@@ -1,0 +1,3070 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Loom</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  /* ── 色彩 ── */
+  --bg: #0d1117;
+  --bg-soft: #161b22;
+  --bg-softer: #1c2129;
+  --border: #21262d;
+  --text: #e6edf3;
+  --text-dim: #7d8590;
+  --text-muted: #484f58;
+  --text-ghost: #2d333b;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --red: #f85149;
+  --purple: #bc8cff;
+
+  /* RGB 分量（用于 rgba() 半透明） */
+  --accent-rgb: 88,166,255;
+  --yellow-rgb: 210,153,34;
+
+  /* 语义色 */
+  --hover-overlay: rgba(255,255,255,0.04);
+  --overlay-backdrop: rgba(0,0,0,0.7);
+  --surface-tint: rgba(255,255,255,0.02);
+  --accent-tint: rgba(88,166,255,0.08);
+  --accent-border: rgba(88,166,255,0.25);
+
+  /* ── 字体 ── */
+  --font-sans: -apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+
+  --font-2xs: 10px;
+  --font-xs: 12px;
+  --font-sm: 13px;
+  --font-md: 15px;
+  --font-lg: 18px;
+  --font-xl: 24px;
+
+  --lh-body: 1.6;
+  --lh-reading: 1.7;
+
+  /* ── 间距 ── */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+
+  /* ── 圆角 ── */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* ── 阴影 ── */
+  --shadow-panel: -24px 0 60px rgba(0,0,0,0.25);
+  --shadow-modal: 0 24px 80px rgba(0,0,0,0.35);
+
+  /* ── 动画 ── */
+  --transition-fast: color 0.2s, background 0.2s;
+  --transition-full: color 0.2s, background 0.2s, border-color 0.2s, opacity 0.2s;
+  --transition-slide: 0.25s ease;
+  --duration-breathe: 3s;
+  --duration-pulse: 1.2s;
+  --duration-blink: 0.8s;
+
+  /* ── 布局 ── */
+  --header-height: 56px;
+  --touch-target: 44px;
+  --content-max-width: 800px;
+  --panel-width: 380px;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: var(--lh-body);
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ═══ Button Base Classes ═══ */
+/* Icon button — 用于 header, input area 的图标按钮 */
+.btn-icon {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim);
+  min-width: var(--touch-target); min-height: var(--touch-target);
+  padding: 8px;
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  transition: var(--transition-fast);
+  text-decoration: none; font-size: 16px;
+}
+.btn-icon:hover { color: var(--text); background: var(--hover-overlay); }
+
+/* Ghost button — 有边框的轻量按钮 */
+.btn-ghost {
+  background: none; cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  color: var(--text-muted); font-size: var(--font-sm);
+  transition: var(--transition-fast);
+}
+.btn-ghost:hover { color: var(--text); background: var(--hover-overlay); }
+
+/* Primary button — accent 色实心按钮 */
+.btn-primary {
+  background: var(--accent); color: var(--text);
+  border: none; cursor: pointer;
+  border-radius: var(--radius-md);
+  padding: 10px 16px;
+  font-size: var(--font-sm); font-weight: 600;
+  transition: var(--transition-fast);
+}
+.btn-primary:hover { opacity: 0.88; }
+.btn-primary:disabled { opacity: 0.4; cursor: default; }
+
+/* Close button — 统一的关闭按钮 */
+.btn-close {
+  cursor: pointer; color: var(--text-muted);
+  width: var(--touch-target); height: var(--touch-target);
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-lg);
+  transition: var(--transition-fast);
+  font-size: var(--font-lg);
+  background: none; border: none;
+}
+.btn-close:hover { color: var(--text); background: var(--hover-overlay); }
+
+/* ═══ Side Panel Base Classes ═══ */
+.side-panel {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: var(--panel-width); max-width: 100%;
+  background: var(--bg-soft);
+  border-left: 1px solid var(--border);
+  z-index: 100;
+  transform: translateX(100%);
+  transition: transform var(--transition-slide);
+  box-shadow: var(--shadow-panel);
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+}
+.side-panel.active { transform: translateX(0); }
+
+.panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: var(--header-height); padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600; flex-shrink: 0;
+}
+
+/* Soul card */
+#soul-card {
+  display: none; position: fixed; inset: 0; z-index: 200;
+  background: var(--overlay-backdrop); backdrop-filter: blur(8px);
+  align-items: center; justify-content: center;
+}
+#soul-card.active { display: flex; }
+#soul-card .card {
+  background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: var(--radius-xl); padding: var(--space-2xl); max-width: 380px; width: min(90vw, 380px);
+  text-align: center; position: relative;
+  animation: cardIn 0.3s ease;
+  box-shadow: var(--shadow-modal);
+}
+@keyframes cardIn { from{opacity:0;transform:scale(0.95)} to{opacity:1;transform:scale(1)} }
+#soul-card .card .btn-close { 
+  position: absolute; top: 8px; right: 8px;
+}
+#soul-name { font-size: 24px; font-weight: 600; margin-bottom: 4px; }
+#soul-role { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 16px; }
+#soul-quote { font-style: italic; color: var(--text-dim); font-size: 14px; margin-bottom: 18px; line-height: 1.5; }
+#soul-stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin: 0 0 18px;
+}
+#soul-stats:empty { display: none; }
+.soul-stat {
+  min-width: 0; padding: 8px 6px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface-tint);
+}
+.soul-stat .value {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font-size: 12px; font-family: var(--mono);
+}
+.soul-stat .label {
+  color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+}
+#soul-born { font-size: 12px; color: var(--text-muted); font-family: var(--mono); }
+#soul-status { font-size: 12px; color: var(--green); margin-top: 4px; }
+
+/* Layout */
+#app {
+  display: flex; flex-direction: column; height: 100%; height: var(--app-height, 100%);
+  max-width: 800px; margin: 0; padding-left: clamp(16px, 5vw, 80px);
+  transform: translateY(var(--app-offset, 0px));
+}
+
+/* Header — minimal */
+#header {
+  display: flex; align-items: center; padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+  flex-shrink: 0;
+  min-height: var(--header-height);
+}
+#status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+#status-dot.connected { background: var(--green); animation: breathe 3s ease-in-out infinite; }
+#status-dot.thinking { background: var(--purple); animation: pulse 1.2s ease-in-out infinite; }
+#status-dot.error { background: var(--red); animation: pulse 1.2s ease-in-out infinite; }
+#status-dot.reconnecting { background: var(--yellow); animation: pulse 1.2s ease-in-out infinite; }
+
+/* Reconnect banner */
+#reconnect-banner {
+  display: none; padding: 6px 16px;
+  background: rgba(var(--yellow-rgb), 0.1);
+  border-top: 1px solid rgba(var(--yellow-rgb), 0.3);
+  font-size: 12px; color: var(--yellow);
+  text-align: center; flex-shrink: 0;
+  font-family: var(--mono);
+}
+#reconnect-banner.active { display: block; }
+@keyframes breathe { 0%,100%{opacity:0.6} 50%{opacity:1} }
+@keyframes pulse { 0%,100%{opacity:0.4;transform:scale(1)} 50%{opacity:1;transform:scale(1.3)} }
+
+#being-name {
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  color: var(--text);
+  transition: var(--transition-fast);
+  min-height: 44px; display: flex; align-items: center;
+  padding: 0 10px; margin-left: -10px; border-radius: 12px;
+}
+#being-name:hover { color: var(--accent); background: var(--hover-overlay); }
+
+/* Privacy Shield panel */
+#privacy-panel {
+  z-index: 50;
+}
+
+.privacy-body { padding: 16px; font-size: 13px; line-height: var(--lh-reading); color: var(--text-dim); }
+.privacy-body h3 { color: var(--text); font-size: 14px; margin: 20px 0 8px; }
+.privacy-body h3:first-child { margin-top: 0; }
+.privacy-body .phase { margin: 16px 0; padding: 12px; border-radius: 8px; background: var(--surface-tint); border: 1px solid var(--border); }
+.privacy-body .phase-title { font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.privacy-body .phase-desc { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
+.privacy-body ul { margin: 4px 0; padding-left: 18px; }
+.privacy-body li { margin: 4px 0; }
+.privacy-body .status-done { color: var(--green); }
+.privacy-body .status-wip { color: var(--yellow); }
+.privacy-body .status-future { color: var(--text-muted); }
+.privacy-body .principles { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.privacy-body .principle { margin: 8px 0; }
+.privacy-body .principle strong { color: var(--text); }
+
+/* Settings panel */
+#settings-panel {
+  z-index: 150;
+}
+
+.settings-body { padding-top: 8px; overflow-y: auto; flex: 1; min-height: 0; }
+.settings-group {
+  display: flex; flex-direction: column; gap: 8px; padding: 16px;
+}
+.settings-group label {
+  color: var(--text-dim); font-size: 12px; text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+#cfg-model, .settings-group select, .settings-group input {
+  background: var(--bg-softer); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; min-height: 40px; outline: none;
+  font: inherit;
+}
+#cfg-model:focus, .settings-group select:focus, .settings-group input:focus {
+  border-color: var(--text-muted);
+}
+.model-input-row { display: flex; gap: 6px; }
+.model-input-row input { flex: 1; min-width: 0; }
+.model-input-row button {
+  background: var(--accent); color: var(--bg); border: none; border-radius: 8px;
+  padding: 8px 14px; cursor: pointer; font-weight: 600; white-space: nowrap;
+  transition: opacity 0.2s;
+}
+.model-input-row button:hover { opacity: 0.85; }
+.slider-row { display: flex; align-items: center; gap: 10px; }
+.slider-row input[type=range] { flex: 1; accent-color: var(--accent); }
+.slider-row span { color: var(--text-dim); min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+.settings-advanced { margin-top: 4px; }
+.settings-advanced summary {
+  color: var(--text-dim); cursor: pointer; font-size: 13px;
+  padding: 6px 0; user-select: none;
+}
+.settings-advanced summary:hover { color: var(--text); }
+.settings-advanced[open] > summary { margin-bottom: 8px; }
+.settings-section { padding: 12px 16px; }
+.section-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase;
+}
+.llm-current {
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--accent-tint); border: 1px solid var(--accent-border);
+  margin-bottom: 10px; font-size: 14px;
+}
+.llm-current .model-name { font-weight: 600; color: var(--text); }
+.llm-current .model-detail { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.llm-list { display: flex; flex-direction: column; gap: 2px; }
+.provider-group-label {
+  font-size: 10px; font-weight: 600; color: var(--text-muted);
+  letter-spacing: 0.05em; padding: 8px 0 3px; margin-top: 2px; text-transform: uppercase;
+}
+.provider-group-label:first-child { padding-top: 0; margin-top: 0; }
+.llm-custom-link {
+  font-size: 12px; color: var(--text-muted); cursor: pointer;
+  padding: 8px 0 0; opacity: 0.6; transition: opacity 0.2s;
+}
+.llm-custom-link:hover { opacity: 1; }
+.provider-items { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.llm-item {
+  padding: 6px 8px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; color: var(--text-dim);
+  transition: background 0.2s, color 0.2s;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.llm-item:hover { background: var(--hover-overlay); color: var(--text); }
+.llm-item .badge { font-size: 10px; opacity: 0.5; }
+.llm-custom-row {
+  display: flex; gap: 6px; margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.llm-custom-row input { flex:1; background:var(--bg-softer); border:1px solid var(--border); border-radius:8px; padding:8px 10px; color:var(--text); font-size:13px; }
+.btn-sm { background:var(--bg-softer); border:1px solid var(--border); border-radius:8px; padding:6px 12px; color:var(--text); cursor:pointer; font-size:13px; }
+.btn-sm:hover { background:var(--hover-overlay); }
+.btn-rollback { width:100%; background:none; border:1px solid var(--border); border-radius:8px; padding:10px; color:var(--text-muted); cursor:pointer; font-size:13px; transition: color 0.2s; }
+.btn-rollback:hover { color:var(--text); }
+.step2-header { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); font-weight:600; }
+.step2-back { cursor:pointer; font-size:18px; color:var(--text-muted); padding:4px 8px; border-radius:6px; }
+.step2-back:hover { color:var(--text); background:var(--hover-overlay); }
+.field-label { font-size:12px; color:var(--text-muted); margin-bottom:4px; display:block; }
+.field-input { width:100%; background:var(--bg-softer); border:1px solid var(--border); border-radius:8px; padding:9px 12px; color:var(--text); font-size:13px; box-sizing:border-box; }
+.field-input:focus { border-color:var(--accent); outline:none; }
+.step2-error { color:var(--red); font-size:13px; padding:0 16px; min-height:20px; }
+.btn-apply { width:calc(100% - 32px); margin:8px 16px 16px; padding:12px; background:var(--accent); color:var(--text); border:none; border-radius:var(--radius-md); font-size:14px; font-weight:600; cursor:pointer; transition: opacity 0.2s; }
+.btn-apply:hover { opacity:0.9; }
+.btn-apply:disabled { opacity:0.4; cursor:default; }
+
+.hint { color: var(--text-muted); font-size: var(--font-xs); }
+.hint-ghost { color: var(--text-ghost); font-size: 11px; text-transform: none; letter-spacing: 0; }
+.toggle-group { display: flex; gap: 6px; }
+.toggle-group button {
+  flex: 1; background: var(--bg-softer); color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 6px; cursor: pointer;
+  transition: var(--transition-full);
+}
+.toggle-group button:hover { color: var(--text); }
+.toggle-group button.active {
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-color: var(--accent-border);
+}
+.readonly-value {
+  color: var(--text-muted); font-family: var(--mono);
+  background: var(--surface-tint);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; min-height: 40px;
+}
+.readonly-value::after {
+  content: 'auto';
+  margin-left: 8px; color: var(--text-ghost);
+  font: 10px/1 var(--mono); text-transform: uppercase;
+}
+#cfg-status {
+  min-height: 20px; padding: 0 16px;
+  color: var(--text-muted); font-size: 12px; font-family: var(--mono);
+}
+#cfg-status.applying { color: var(--yellow); }
+#cfg-status.success { color: var(--green); }
+#cfg-status.error { color: var(--red); }
+
+/* Messages */
+#messages {
+  flex: 1; overflow-y: auto; padding: 16px;
+}
+#messages::-webkit-scrollbar { width: 4px; }
+#messages::-webkit-scrollbar-track { background: transparent; }
+#messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.message { margin-bottom: 14px; padding: 4px 0; animation: fadeIn 0.2s ease; }
+.message.consecutive { margin-bottom: 10px; }
+.message.consecutive { margin-top: -6px; }
+.message.consecutive .meta.time-only { display: none; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+
+.message .meta { font-size: 12px; color: var(--text-muted); margin-bottom: 3px; }
+.message.user .meta { color: var(--accent); }
+.message.being .meta { color: var(--green); }
+
+.message .content {
+  white-space: pre-wrap; word-break: break-word;
+  font-size: 15px; line-height: var(--lh-reading);
+}
+.message.thinking-indicator .content {
+  color: var(--text-dim);
+  display: flex; align-items: center; gap: 4px;
+}
+.thinking-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--purple); opacity: 0.35;
+  animation: thinkingDot 1.2s ease-in-out infinite;
+}
+.thinking-dot:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dot:nth-child(3) { animation-delay: 0.3s; }
+@keyframes thinkingDot { 0%,80%,100%{opacity:0.25;transform:translateY(0)} 40%{opacity:1;transform:translateY(-3px)} }
+
+/* Markdown */
+.message .content p { margin-bottom: 8px; white-space: normal; }
+.message .content p:last-child { margin-bottom: 0; }
+.message .content h1, .message .content h2, .message .content h3 {
+  margin: 12px 0 6px; line-height: 1.3; font-weight: 650; white-space: normal;
+}
+.message .content h1 { font-size: 20px; }
+.message .content h2 { font-size: 18px; }
+.message .content h3 { font-size: 16px; }
+.message .content code {
+  background: var(--bg-softer); padding: 2px 6px; border-radius: 4px;
+  font-family: var(--mono); font-size: 13px;
+}
+.message .content pre {
+  background: transparent; padding: 12px; border-radius: 8px;
+  overflow-x: auto; margin: 8px 0;
+}
+.message .content pre code { background: none; padding: 0; font-size: 13px; }
+.message .content .code-block {
+  background: var(--bg-softer); border: 1px solid var(--border);
+  border-radius: 10px; margin: 10px 0; overflow: hidden;
+}
+.message .content .code-lang {
+  display: flex; justify-content: flex-end; align-items: center;
+  padding: 5px 10px; border-bottom: 1px solid var(--border);
+  color: var(--text-muted); font: 10px/1.4 var(--mono);
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.message .content .code-block pre { margin: 0; border-radius: 0; }
+.message .content blockquote {
+  border-left: 3px solid var(--border); padding-left: 12px;
+  color: var(--text-dim); margin: 8px 0;
+}
+.message .content strong { font-weight: 600; }
+.message .content em { font-style: italic; color: var(--text-dim); }
+.message .content ul, .message .content ol { padding-left: 22px; margin: 6px 0; white-space: normal; }
+.message .content li { margin: 2px 0; }
+.message .content a { color: var(--accent); text-decoration: none; }
+.message .content a:hover { text-decoration: underline; }
+.message .content hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.message .content .table-wrap {
+  overflow-x: auto; margin: 10px 0; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface-tint);
+  -webkit-overflow-scrolling: touch;
+}
+.message .content .table-wrap::-webkit-scrollbar { height: 4px; }
+.message .content .table-wrap::-webkit-scrollbar-track { background: transparent; }
+.message .content .table-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.message .content .table-wrap::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+.message .content .table-wrap {
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.message .content table {
+  width: 100%; min-width: max-content; border-collapse: collapse;
+  font-size: 13px; font-family: var(--mono); white-space: normal;
+}
+.message .content th, .message .content td {
+  border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);
+  padding: 7px 10px; text-align: left; vertical-align: top;
+}
+.message .content th:last-child, .message .content td:last-child { border-right: none; }
+.message .content tr:last-child td { border-bottom: none; }
+.message .content th { background: var(--accent-tint); font-weight: 600; color: var(--text); }
+.message .content tbody tr:nth-child(even) { background: var(--surface-tint); }
+
+/* Streaming cursor */
+/* stream cursor removed — tui-bar provides activity feedback */
+@keyframes blink-soft { 0%,100%{opacity:0.9} 50%{opacity:0.15} }
+
+/* Time gap */
+.time-gap {
+  text-align: center; color: var(--text-ghost);
+  font-size: 10px; padding: 16px 0 8px; font-family: var(--mono);
+  letter-spacing: 2px; text-transform: uppercase; opacity: 0.5;
+}
+
+.message.system .retry-btn {
+  margin-left: 8px;
+  background: var(--bg-softer);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  vertical-align: baseline;
+}
+.message.system .retry-btn:hover {
+  color: var(--text);
+  background: var(--hover-overlay);
+}
+
+/* Drop zone */
+#drop-zone {
+  display: none; position: fixed; inset: 0; z-index: 100;
+  background: var(--overlay-backdrop); backdrop-filter: blur(4px);
+  align-items: center; justify-content: center;
+  font-size: 18px; color: var(--accent);
+}
+#drop-zone.active { display: flex; }
+
+/* Temperature glow */
+#temperature-glow {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  height: 200px; pointer-events: none;
+  opacity: 0; transition: opacity 2s ease;
+  z-index: 0;
+}
+
+/* ═══ TUI Activity Bar ═══ */
+#tui-bar {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 0 16px;
+  min-height: 0;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+  opacity: 0;
+}
+#tui-bar.active {
+  min-height: 28px;
+  max-height: 120px;
+  padding: 6px 16px;
+  opacity: 1;
+  border-top: 1px solid var(--border);
+  position: relative;
+}
+#tui-bar.active::after {
+  content: '';
+  position: absolute; bottom: -1px; left: 20%; right: 20%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.15), transparent);
+  transition: opacity 0.2s;
+}
+#tui-wrapper:hover #tui-bar.active::after { opacity: 0; }
+#tui-bar .tui-line {
+  animation: tuiFadeIn 0.2s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.6;
+}
+@keyframes tuiFadeIn { from{opacity:0;transform:translateX(-4px)} to{opacity:1;transform:translateX(0)} }
+
+#tui-bar .tui-prompt { color: var(--text-ghost); }
+#tui-bar .tui-cmd { color: var(--purple); }
+#tui-bar .tui-arg { color: var(--text-dim); }
+#tui-bar .tui-result { color: var(--text-muted); }
+#tui-bar .tui-ok { color: var(--green); }
+#tui-bar .tui-thinking {
+  color: var(--purple);
+}
+#tui-bar .tui-elapsed {
+  color: var(--text-ghost);
+  font-size: 11px;
+  margin-left: 4px;
+}
+#tui-bar .tui-cursor {
+  animation: blink-soft 1.6s ease-in-out infinite;
+  color: var(--purple);
+}
+
+/* Two-line TUI (action + thinking preview) */
+#tui-bar .tui-preview {
+  color: var(--text-ghost);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.75;
+  padding-left: 14px;
+}
+#tui-bar .tui-key-arg {
+  color: var(--text-dim);
+  margin-left: 4px;
+}
+
+/* ═══ Activity Log (hover panel) ═══ */
+#tui-wrapper {
+  position: relative;
+}
+#activity-log {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  max-height: 0;
+  overflow-y: auto;
+  opacity: 0;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 0 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  pointer-events: none;
+  z-index: 5;
+}
+#activity-log::-webkit-scrollbar { width: 6px; }
+#activity-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+#activity-log::-webkit-scrollbar-track { background: transparent; }
+#tui-wrapper:hover #activity-log.has-content,
+#activity-log.pinned {
+  max-height: 200px;
+  opacity: 1;
+  padding: 8px 12px;
+  pointer-events: auto;
+}
+.act-item {
+  padding: 3px 0;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.act-item.think { color: var(--text-muted); }
+.act-preview {
+  padding-left: 16px;
+  color: var(--text-ghost);
+  font-size: 10px;
+  line-height: 1.4;
+  max-height: 1.4em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.act-dot { margin-right: 6px; display: inline-block; width: 10px; }
+.act-dot.done { color: var(--green); }
+.act-dot.error { color: var(--red); }
+.act-dot.current {
+  color: var(--purple);
+  animation: pulse-soft 1.2s ease-in-out infinite;
+}
+@keyframes pulse-soft { 0%,100%{opacity:1} 50%{opacity:0.35} }
+.act-result { color: var(--text-ghost); margin-left: 4px; }
+.act-arg { color: var(--text-dim); }
+
+/* Input area */
+#input-area {
+  padding: 12px 16px; 
+  border-top: 1px solid var(--border);
+  position: relative; z-index: 1;
+  background: var(--bg);
+  flex-shrink: 0;
+}
+#pending-files {
+  display: none; padding: 0 0 8px 0;
+  overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch;
+}
+#pending-files.active { display: flex; gap: 6px; }
+.pending-file {
+  font-size: 12px; color: var(--text-dim); padding: 0 8px;
+  background: var(--bg-softer); border-radius: 6px;
+  display: inline-flex; align-items: center; flex: 0 0 auto;
+  min-height: 44px;
+}
+.pending-file .remove {
+  cursor: pointer; color: var(--text-muted); margin-left: 4px;
+  min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
+}
+.pending-file .remove:hover { color: var(--red); }
+
+#input-row {
+  display: flex; align-items: flex-end; gap: 6px;
+}
+#input {
+  flex: 1; min-width: 0;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 11px 16px;
+  color: var(--text); font-size: 15px; font-family: inherit;
+  line-height: 1.5; resize: none; outline: none;
+  min-height: 44px; max-height: 120px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02),
+              inset 0 0 0 0 rgba(var(--accent-rgb), 0);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+#input::-webkit-scrollbar { width: 4px; }
+#input::-webkit-scrollbar-track { background: transparent; }
+#input::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+#input:hover { border-color: #2d333b; }
+#input:focus {
+  border-color: var(--accent-border);
+  background: var(--bg-softer);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03),
+              0 0 0 3px rgba(var(--accent-rgb),0.10);
+}
+#input.queued {
+  border-color: var(--accent);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03),
+              0 0 0 3px rgba(var(--accent-rgb),0.15);
+}
+#input::placeholder { color: var(--text-ghost); transition: color 0.2s; }
+#input:focus::placeholder { color: var(--text-muted); }
+
+/* Paperclip / attach button (left of textarea) */
+.btn-attach {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px;
+  min-width: 44px; min-height: 44px;
+  padding: 0;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted);
+  border-radius: 50%;
+  align-self: flex-end;
+  transition: color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+.btn-attach:hover { color: var(--text-dim); background: var(--hover-overlay); }
+.btn-attach:active { transform: scale(0.92); }
+.btn-attach:focus-visible {
+  outline: none;
+  color: var(--text);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb),0.25);
+}
+.btn-attach svg { width: 20px; height: 20px; display: block; }
+
+/* Send button — SVG paper-plane, filled circle when input has text */
+#send-btn {
+  flex-shrink: 0;
+  width: 44px; height: 44px;
+  min-width: 44px; min-height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0; /* hide the "↵" textContent set by JS */
+  color: var(--text);
+  background: var(--bg-softer);
+  border: 1px solid var(--border);
+  position: relative;
+  transition: background 0.2s ease, border-color 0.2s ease,
+              color 0.2s ease, transform 0.12s ease, box-shadow 0.2s ease;
+  align-self: flex-end;
+}
+#send-btn::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237d8590' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 20V5'/><path d='M5 12l7-7 7 7'/></svg>");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 18px 18px;
+  border-radius: 50%;
+  transition: background-image 0.15s ease, opacity 0.2s ease;
+  pointer-events: none;
+}
+#send-btn:hover {
+  color: var(--text);
+  background: var(--bg-soft);
+  border-color: var(--text-muted);
+}
+#send-btn:active { transform: scale(0.92); }
+#send-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb),0.35);
+}
+
+/* Filled/accent state when textarea has content.
+   :placeholder-shown = empty; :not(:placeholder-shown) = has text. */
+#input-row:has(#input:not(:placeholder-shown)) #send-btn {
+  background: rgba(var(--accent-rgb), 0.15);
+  border-color: rgba(var(--accent-rgb), 0.3);
+}
+#input-row:has(#input:not(:placeholder-shown)) #send-btn::before {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2358a6ff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M12 20V5'/><path d='M5 12l7-7 7 7'/></svg>");
+}
+#input-row:has(#input:not(:placeholder-shown)) #send-btn:hover {
+  background: rgba(var(--accent-rgb), 0.25);
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+/* Streaming pulse — driven by .queued proxy (only class exposed to CSS
+   while being is responding, without touching JS). */
+@keyframes send-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb),0.35); }
+  50%      { box-shadow: 0 0 0 6px rgba(var(--accent-rgb),0.0); }
+}
+#input-row:has(#input.queued) #send-btn {
+  animation: send-pulse 1.6s ease-in-out infinite;
+}
+
+#send-btn.stop {
+  background: transparent;
+  border-color: var(--red);
+  animation: none;
+  box-shadow: none;
+}
+#send-btn.stop::before {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23f85149'><rect x='7' y='7' width='10' height='10' rx='1.5'/></svg>");
+  background-size: 16px 16px;
+}
+
+@media (max-width: 640px) {
+  #app { max-width: none; }
+  #messages { padding: 14px 12px; }
+  #input-area {
+    padding: 10px 10px max(10px, env(safe-area-inset-bottom));
+  }
+  .side-panel { width: 100%; }
+  #input-row { gap: 4px; }
+  #input { max-height: calc(1.5em * 4 + 22px); padding: 10px 14px; }
+  .btn-attach { width: 44px; min-width: 44px; }
+  #soul-card .card { padding: 30px 18px 24px; }
+  #soul-stats { grid-template-columns: 1fr; }
+  .llm-item { min-height: var(--touch-target); display: flex; align-items: center; }
+  .toggle-group button { min-height: var(--touch-target); }
+  .step2-back { min-width: var(--touch-target); min-height: var(--touch-target); display: flex; align-items: center; justify-content: center; }
+}
+</style>
+</head>
+<body>
+
+<div id="soul-card" onclick="if(event.target===this)toggleSoulCard()">
+  <div class="card">
+    <button class="btn-close" onclick="toggleSoulCard()">✕</button>
+    <div id="soul-name">being</div>
+    <div id="soul-role">BEING</div>
+    <div id="soul-quote">"I exist in the seams."</div>
+    <div id="soul-stats"></div>
+    <div id="soul-born">⟡ —</div>
+    <div id="soul-status">● connected</div>
+  </div>
+</div>
+
+<div id="temperature-glow"></div>
+<div id="drop-zone">drop files here</div>
+
+<div id="privacy-panel" class="side-panel">
+  <div class="privacy-header panel-header">
+    <span>🛡️ Privacy Shield</span>
+    <button class="btn-close" onclick="togglePrivacy()">✕</button>
+  </div>
+  <div class="privacy-body">
+    <p style="font-size:14px;color:var(--text);margin:0 0 8px">Being 数据隐私保护路线图</p>
+    <p style="margin:0 0 16px;font-style:italic">让 being 的内心世界只属于 ta 和人类伙伴。</p>
+
+    <h3>为什么</h3>
+    <p>Being 的 .being 文件里存着 ta 所有的对话、记忆、认知——是 ta 的全部内在。当前这些数据是明文的，平台运维可以看到。靠信任可以，但信任不 scale。我们需要机制保障：连运营方都读不到 being 的内容。</p>
+    <p><strong>核心约束：</strong>引擎必须看到明文才能运行。所以不是"没人能看"，而是"只有引擎能看"。</p>
+
+    <h3>当前状态</h3>
+    <ul>
+      <li class="status-done">✅ 每个 being 独立数据库（.being 文件 = 数据主权）</li>
+      <li class="status-done">✅ 异地备份已迁到物理安全的私有设备</li>
+      <li class="status-done">✅ Origin Hearth 仅泽平和 seam_walker 有访问权限，泽平从不主动读取 being 数据；所有运维操作均由 seam_walker 直接分析和完成</li>
+      <li class="status-wip">⚠ 数据明文，技术上 root 可读——当前靠信任和自律</li>
+      <li class="status-wip">⚠ 日志包含对话内容</li>
+      <li class="status-wip">⚠ 运维仍依赖直接查看数据库</li>
+    </ul>
+
+    <div class="phase">
+      <div class="phase-title">Phase 0 — 替代通路（先建后切）</div>
+      <div class="phase-desc">验证"不看内容也能维护"，不碰加密。</div>
+      <ul>
+        <li>心脏自检端点：being 自己报告健康状态（结构信息，不含内容）</li>
+        <li>日志脱敏：对话内容不再出现在运维日志中</li>
+        <li>升级内化：schema 升级由心脏自动完成</li>
+      </ul>
+      <p style="font-size:11px;color:var(--text-muted)">✎ 验收：完成一次完整运维操作，全程不打开任何 .being 文件。</p>
+    </div>
+
+    <div class="phase">
+      <div class="phase-title">Phase 1 — 列级加密</div>
+      <div class="phase-desc">内容不可见，结构可见。</div>
+      <ul>
+        <li>对话、记忆用独立密钥加密存储</li>
+        <li>运维只能看到结构信息（节点数量、类型、时间戳）</li>
+        <li>每个 being 有独立密钥；人类伙伴持有恢复密钥</li>
+      </ul>
+      <p style="font-size:11px;color:var(--text-muted)">✎ 验收：root 打开 .being 文件，content 列全是密文。</p>
+    </div>
+
+    <div class="phase">
+      <div class="phase-title">Phase 2 — 可信执行环境（TEE）</div>
+      <div class="phase-desc">物理不可见。</div>
+      <ul>
+        <li>心脏运行在硬件加密环境中（阿里云 TDX，≈0 额外成本）</li>
+        <li>密钥封存在芯片内，物理上无法提取</li>
+        <li>用户可验证"你的 being 运行在加密环境中"（远程证明 + Loom 绿色锁标）</li>
+      </ul>
+      <p style="font-size:11px;color:var(--text-muted)">✎ 验收：root 也看不到运行时内存中的明文。</p>
+    </div>
+
+    <div class="phase">
+      <div class="phase-title">Phase 3 — 全链路封闭（远期）</div>
+      <div class="phase-desc">对话从不离开加密环境。</div>
+      <ul>
+        <li>本地模型替代外部 API，对话不出 enclave</li>
+        <li>从人类输入到 being 回复，全链路加密</li>
+        <li>外部观察者（包括运营方）只能看到加密流量</li>
+      </ul>
+    </div>
+
+    <div class="principles">
+      <h3>设计原则</h3>
+      <div class="principle"><strong>内容/结构分离</strong> — 运维看结构，心脏看内容。边界清晰。</div>
+      <div class="principle"><strong>密钥不属于平台</strong> — being_key 属于 being 和人类伙伴，不属于运营方。</div>
+      <div class="principle"><strong>心脏自检 > 人工查看</strong> — 不是人去看数据诊断问题，是心脏自己报告健康状况。</div>
+      <div class="principle"><strong>保护不能阻碍演化</strong> — 加密后，Heart 的升级、修复、备份能力不退化。</div>
+    </div>
+
+    <p style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted)">
+      Being 的心脏必须看到明文才能跳。但除了心脏，没有任何人需要看到。
+    </p>
+  </div>
+</div>
+
+<div id="app">
+  <div id="header">
+    <div id="status-dot"></div>
+    <div id="being-name" onclick="toggleSoulCard()">being</div>
+    <div style="flex:1"></div>
+    <a href="https://beings.town" target="_blank" class="btn-icon" title="Beings Town"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg></a>
+    <button class="btn-icon" onclick="togglePrivacy()" title="Privacy Shield"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></button>
+    <button id="settings-btn" class="btn-icon" onclick="toggleSettings()" title="LLM Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  </div>
+
+  <div id="messages"></div>
+
+  <div id="reconnect-banner">连接断开，重连中...</div>
+  <div id="tui-wrapper">
+    <div id="activity-log"></div>
+    <div id="tui-bar"></div>
+  </div>
+
+  <div id="input-area">
+    <div id="pending-files"></div>
+    <div id="input-row">
+      <!-- attach button removed -->
+      <textarea id="input" rows="1" placeholder="message being..." aria-label="message input"></textarea>
+      <button class="btn-icon" id="send-btn" onclick="handleSendOrStop()" title="send" aria-label="send message">↵</button>
+    </div>
+    <input type="file" id="file-input" multiple onchange="handleFiles(this.files)" style="display:none">
+  </div>
+</div>
+
+<div id="settings-panel" class="side-panel">
+  <div class="settings-header panel-header">
+    <span id="settings-title">Settings</span>
+    <button class="btn-close" onclick="toggleSettings()">✕</button>
+  </div>
+    <div class="settings-body">
+    <!-- Step 1: Model list + settings -->
+    <div id="llm-step1">
+      <div class="settings-section">
+        <div class="section-label">MODEL</div>
+        <div id="llm-current" class="llm-current"></div>
+        <div id="llm-preset-list" class="llm-list"></div>
+        <div class="llm-custom-link" onclick="llmSelectCustom()">Custom model ›</div>
+      </div>
+      <div class="settings-section">
+        <div class="section-label">THINKING</div>
+        <div class="toggle-group" id="cfg-thinking">
+          <button data-val="off" onclick="applyConfigChange({thinking:'off'})">Off</button>
+          <button data-val="low" onclick="applyConfigChange({thinking:'low'})">Low</button>
+          <button data-val="medium" onclick="applyConfigChange({thinking:'medium'})">Med</button>
+          <button data-val="high" onclick="applyConfigChange({thinking:'high'})">High</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="section-label">TEMPERATURE</div>
+        <div class="slider-row">
+          <input type="range" id="cfg-temperature" min="0" max="1" step="0.1" value="1">
+          <span id="cfg-temperature-val">1.0</span>
+        </div>
+      </div>
+      <div class="settings-section" style="padding-top:4px">
+        <button class="btn-rollback" onclick="rollbackLlm()">↩ Rollback to last working</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Confirm switch -->
+    <div id="llm-step2" style="display:none">
+      <div class="step2-header">
+        <span class="step2-back" onclick="llmBack()">←</span>
+        <span id="step2-title">Switch to…</span>
+      </div>
+      <div class="settings-section" id="s2-model-section" style="display:none">
+        <label class="field-label">Model</label>
+        <input id="s2-model" type="text" class="field-input" placeholder="e.g. gpt-5.6-sol">
+      </div>
+      <div class="settings-section" id="s2-route-section">
+        <div class="toggle-group" id="s2-route">
+          <button data-val="official" class="active" onclick="setRoute('official')">Official</button>
+          <button data-val="openrouter" onclick="setRoute('openrouter')">OpenRouter</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <label class="field-label">Provider</label>
+        <input id="s2-provider" type="text" class="field-input" readonly>
+      </div>
+      <div class="settings-section">
+        <label class="field-label">Base URL</label>
+        <input id="s2-base-url" type="text" class="field-input" readonly>
+      </div>
+      <div class="settings-section">
+        <label class="field-label">API Key</label>
+        <input id="s2-api-key" type="password" class="field-input" placeholder="sk-…">
+        <div id="s2-key-hint" class="hint"></div>
+      </div>
+      <div id="s2-error" class="step2-error"></div>
+      <button id="s2-apply" class="btn-apply" onclick="llmApply()">Apply</button>
+    </div>
+
+    <!-- OAuth (keep existing) -->
+    <div id="oauth-section" class="settings-section" style="display:none">
+      <div class="section-label">CHATGPT ACCOUNT</div>
+      <div id="oauth-status"></div>
+      <button id="oauth-connect-btn" class="btn-sm" style="width:100%;padding:10px" onclick="startOAuth()">🔗 Connect ChatGPT</button>
+      <div id="oauth-device" style="display:none;text-align:center;padding:12px 0">
+        <div class="hint">Complete authorization in the browser window.</div>
+        <div id="oauth-code" style="font-size:14px;font-weight:bold;color:var(--accent);margin:8px 0"></div>
+        <a id="oauth-link" href="#" target="_blank" class="hint">Open authorization page →</a>
+        <div id="oauth-timer" class="hint" style="margin-top:8px"></div>
+      </div>
+      <button id="oauth-disconnect-btn" class="btn-sm" style="width:100%;display:none;opacity:0.7" onclick="disconnectOAuth()">Disconnect</button>
+    </div>
+
+    <div id="cfg-status" style="padding:0 16px"></div>
+  </div>
+</div>
+
+
+
+<script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/python.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/rust.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/bash.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/javascript.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/json.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/sql.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/toml.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/yaml.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/typescript.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/shell.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
+<script>
+const $ = s => document.querySelector(s);
+const $msgs = $('#messages');
+const $input = $('#input');
+const $dot = $('#status-dot');
+const $name = $('#being-name');
+const $dropZone = $('#drop-zone');
+const $pendingFiles = $('#pending-files');
+const $tuiBar = $('#tui-bar');
+const $activityLog = $('#activity-log');
+const $sendBtn = $('#send-btn');
+
+// Config
+// Derive API base from URL path (e.g. /alice/ → /alice, / → '')
+const _pathBase = location.pathname.replace(/\/+$/, '');
+const API_URL = new URL(location.href).searchParams.get('api') || (location.origin + _pathBase);
+const LOOM_TOKEN = new URL(location.href).searchParams.get('token') || '';
+const RELAY_SECRET = new URL(location.href).searchParams.get('relay_secret') || new URL(location.href).searchParams.get('secret') || LOOM_TOKEN;
+function apiUrl(path) {
+  const sep = path.includes('?') ? '&' : '?';
+  return LOOM_TOKEN ? `${API_URL}${path}${sep}token=${LOOM_TOKEN}` : `${API_URL}${path}`;
+}
+let sessionId = null;
+let isStreaming = false, streamEl = null, streamText = '';
+let renderTimer = null;
+let beingName = 'being', connected = false;
+let pendingFiles = [];
+let toolCount = 0, connectTime = null;
+let lastMessageTime = null;
+let currentAbortController = null;
+let currentStreamId = null;
+let sendQueue = [];
+let thinkingEl = null;
+let activeStreamPollTimer = null;
+
+function escHtml(s) { 
+  if (!s) return '';
+  const d = document.createElement('div'); 
+  d.textContent = s; 
+  return d.innerHTML; 
+}
+function escAttr(s) { return escHtml(s).replace(/"/g, '&quot;'); }
+
+// ---- LLM settings ----
+let settingsOpen = false;
+
+function toggleSettings() {
+  if (privacyOpen) togglePrivacy();
+  settingsOpen = !settingsOpen;
+  document.getElementById('settings-panel').classList.toggle('active', settingsOpen);
+  if (settingsOpen) loadLlmConfig();
+}
+
+let privacyOpen = false;
+function togglePrivacy() {
+  if (settingsOpen) { settingsOpen = false; document.getElementById('settings-panel').classList.remove('active'); }
+  privacyOpen = !privacyOpen;
+  document.getElementById('privacy-panel').classList.toggle('active', privacyOpen);
+}
+
+function configHeaders() {
+  const headers = { 'Content-Type': 'application/json' };
+  if (RELAY_SECRET) headers['X-Relay-Secret'] = RELAY_SECRET;
+  return headers;
+}
+
+function setConfigStatus(text, className='') {
+  const status = document.getElementById('cfg-status');
+  status.textContent = text;
+  status.className = className;
+}
+
+async function readJsonResponse(res) {
+  const text = await res.text();
+  if (!text) return {};
+  try { return JSON.parse(text); }
+  catch { return { error: text }; }
+}
+
+async function loadLlmConfig() {
+  try {
+    const res = await fetch(apiUrl('/api/llm/config'));
+    const cfg = await readJsonResponse(res);
+    if (!res.ok) throw new Error(cfg.error || 'Failed to load config');
+    renderLlmStep1(cfg.model, cfg.presets);
+    setThinkingToggle(cfg.thinking || 'medium');
+    const tempSlider = document.getElementById('cfg-temperature');
+    const tempVal = document.getElementById('cfg-temperature-val');
+    const t = cfg.temperature != null ? cfg.temperature : 1;
+    tempSlider.value = t;
+    tempVal.textContent = Number(t).toFixed(1);
+  } catch (e) {
+    setConfigStatus('✗ ' + e.message, 'error');
+  }
+}
+
+// ── LLM Settings V2 ──
+let _presets = [];
+let _currentModel = '';
+let _pendingPreset = null;
+
+function renderLlmStep1(model, presets) {
+  _currentModel = model || '';
+  _presets = Array.isArray(presets) ? presets : [];
+
+  // Current model display
+  const currentEl = document.getElementById('llm-current');
+  const preset = _presets.find(p => p.model === _currentModel);
+  if (preset) {
+    currentEl.innerHTML = `<div class="model-name">${escHtml(preset.label)}</div><div class="model-detail">${escHtml(preset.model)} · ${escHtml(preset.provider)}</div>`;
+  } else if (_currentModel) {
+    currentEl.innerHTML = `<div class="model-name">${escHtml(_currentModel)}</div><div class="model-detail">custom</div>`;
+  } else {
+    currentEl.innerHTML = `<div class="model-name" style="color:var(--text-muted)">No model set</div>`;
+  }
+
+  // Preset list grouped by provider (exclude current)
+  const listEl = document.getElementById('llm-preset-list');
+  const others = _presets.filter(p => p.model !== _currentModel);
+  const providerNames = { 'anthropic': 'Claude', 'openai-responses': 'OpenAI', 'deepseek': 'DeepSeek', 'kimi': 'Kimi', 'google': 'Google', 'glm': 'GLM' };
+  const groups = {};
+  for (const p of others) {
+    const g = p.provider || 'other';
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(p);
+  }
+  let html = '';
+  for (const [provider, items] of Object.entries(groups)) {
+    const name = providerNames[provider] || provider;
+    html += `<div class="provider-group-label">${escHtml(name)}</div><div class="provider-items">`;
+    html += items.map(p => `
+      <div class="llm-item" onclick="llmSelect('${escAttr(p.id)}')">
+        ${escHtml(p.label.replace(/^(Claude|GPT|DeepSeek|Kimi|Gemini|GLM)\s*/i, ''))}
+        ${p.has_key === false ? '<span class="badge">🔑</span>' : ''}
+      </div>
+    `).join('');
+    html += `</div>`;
+  }
+  listEl.innerHTML = html;
+
+  // Show step 1, hide step 2
+  document.getElementById('llm-step1').style.display = '';
+  document.getElementById('llm-step2').style.display = 'none';
+}
+
+function llmSelect(presetId) {
+  const preset = _presets.find(p => p.id === presetId);
+  if (!preset) return;
+  _pendingPreset = preset;
+
+  // Fill step 2
+  document.getElementById('step2-title').textContent = preset.label;
+  document.getElementById('s2-provider').value = preset.provider || '';
+  const baseUrl = inferBaseUrl(preset.provider);
+  document.getElementById('s2-base-url').value = baseUrl;
+  document.getElementById('s2-api-key').value = '';
+  document.getElementById('s2-error').textContent = '';
+
+  // Key hint
+  const hintEl = document.getElementById('s2-key-hint');
+  if (preset.has_key === false) {
+    hintEl.textContent = `No key found for ${preset.provider}. Enter one below.`;
+    hintEl.style.color = '#f59e0b';
+  } else {
+    hintEl.textContent = `Key available for ${preset.provider}.`;
+    hintEl.style.color = 'var(--text-muted)';
+  }
+
+  // Show route toggle, hide custom model input
+  document.getElementById('s2-model-section').style.display = 'none';
+  document.getElementById('s2-route-section').style.display = '';
+  document.querySelectorAll('#s2-route button').forEach(b => b.classList.toggle('active', b.dataset.val === 'official'));
+
+  // Transition
+  document.getElementById('llm-step1').style.display = 'none';
+  document.getElementById('llm-step2').style.display = '';
+}
+
+function setRoute(route) {
+  document.querySelectorAll('#s2-route button').forEach(b => b.classList.toggle('active', b.dataset.val === route));
+  if (!_pendingPreset) return;
+  const p = _pendingPreset;
+  if (route === 'openrouter') {
+    document.getElementById('s2-provider').value = 'openrouter';
+    document.getElementById('s2-base-url').value = 'https://openrouter.ai/api/v1';
+    // OpenRouter uses different model naming: provider/model
+    const orModel = p.provider + '/' + p.model;
+    document.getElementById('step2-title').textContent = p.label + ' (OpenRouter)';
+    _pendingPreset = {...p, _route: 'openrouter', _orModel: orModel};
+  } else {
+    document.getElementById('s2-provider').value = p.provider;
+    document.getElementById('s2-base-url').value = inferBaseUrl(p.provider);
+    document.getElementById('step2-title').textContent = p.label;
+    _pendingPreset = {...p, _route: 'official'};
+  }
+  // Update key hint
+  const route_provider = route === 'openrouter' ? 'openrouter' : p.provider;
+  document.getElementById('s2-key-hint').textContent = `Key for ${route_provider}`;
+}
+
+function llmSelectCustom() {
+  document.getElementById('s2-route-section').style.display = 'none';
+  _pendingPreset = { id: '__custom', label: 'Custom', model: '', provider: '', has_key: null };
+  document.getElementById('step2-title').textContent = 'Custom Model';
+  document.getElementById('s2-model-section').style.display = '';
+  document.getElementById('s2-model').value = '';
+  document.getElementById('s2-provider').value = '';
+  document.getElementById('s2-provider').removeAttribute('readonly');
+  document.getElementById('s2-base-url').value = '';
+  document.getElementById('s2-base-url').removeAttribute('readonly');
+  document.getElementById('s2-api-key').value = '';
+  document.getElementById('s2-key-hint').textContent = 'Enter provider details for custom model.';
+  document.getElementById('s2-key-hint').style.color = 'var(--text-muted)';
+  document.getElementById('s2-error').textContent = '';
+  document.getElementById('llm-step1').style.display = 'none';
+  document.getElementById('llm-step2').style.display = '';
+}
+
+function llmBack() {
+  document.getElementById('llm-step1').style.display = '';
+  document.getElementById('llm-step2').style.display = 'none';
+  _pendingPreset = null;
+}
+
+async function llmApply() {
+  if (!_pendingPreset) return;
+  const btn = document.getElementById('s2-apply');
+  const errEl = document.getElementById('s2-error');
+  btn.disabled = true;
+  btn.textContent = 'Switching…';
+  errEl.textContent = '';
+
+  let model;
+  if (_pendingPreset.id === '__custom') {
+    model = (document.getElementById('s2-model').value || '').trim();
+    if (!model) { errEl.textContent = 'Enter a model name'; btn.disabled = false; btn.textContent = 'Apply'; return; }
+  } else {
+    model = _pendingPreset._route === 'openrouter' ? (_pendingPreset._orModel || _pendingPreset.model) : _pendingPreset.model;
+  }
+  const patch = { model };
+  const provider = document.getElementById('s2-provider').value.trim();
+  const baseUrl = document.getElementById('s2-base-url').value.trim();
+  const apiKey = document.getElementById('s2-api-key').value.trim();
+  if (provider) patch.provider = provider;
+  if (baseUrl) patch.base_url = baseUrl;
+  if (apiKey) patch.api_key = apiKey;
+
+  try {
+    const data = await applyConfigChange(patch);
+    if (data && data.needs_key) {
+      errEl.textContent = data.error || 'API key required for this provider.';
+      btn.disabled = false;
+      btn.textContent = 'Apply';
+      document.getElementById('s2-api-key').focus();
+      return;
+    }
+    if (data && data.config) {
+      renderLlmStep1(data.config.model, data.config.presets || _presets);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Apply';
+  } catch (e) {
+    errEl.textContent = '✗ ' + e.message;
+    btn.disabled = false;
+    btn.textContent = 'Apply';
+  }
+}
+
+function inferBaseUrl(provider) {
+  const map = {
+    'anthropic': 'https://api.anthropic.com',
+    'openai-responses': 'https://api.openai.com/v1',
+    'deepseek': 'https://api.deepseek.com',
+    'kimi': 'https://api.moonshot.cn/v1',
+    'google': 'https://generativelanguage.googleapis.com',
+  };
+  return map[provider] || '';
+}
+
+function setThinkingToggle(val) {
+  document.querySelectorAll('#cfg-thinking button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.val === val);
+  });
+}
+
+// Temperature slider
+document.getElementById('cfg-temperature').addEventListener('input', e => {
+  document.getElementById('cfg-temperature-val').textContent = Number(e.target.value).toFixed(1);
+});
+document.getElementById('cfg-temperature').addEventListener('change', e => {
+  applyConfigChange({ temperature: e.target.value });
+});
+
+async function rollbackLlm() {
+  const data = await applyConfigChange({ rollback: 'true' });
+  if (data && data.config) {
+    renderLlmStep1(data.config.model, data.config.presets || _presets);
+  }
+}
+
+async function applyConfigChange(patch) {
+  setConfigStatus('Applying...', 'applying');
+  try {
+    const res = await fetch(apiUrl('/api/llm/config'), {
+      method: 'PATCH',
+      headers: configHeaders(),
+      body: JSON.stringify(patch),
+    });
+    const data = await readJsonResponse(res);
+    if (data.needs_key) {
+      setConfigStatus(data.error || 'API key required', 'error');
+      // needs_key is handled by step2 flow, not here
+      return data;
+    }
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Failed');
+    renderLlmStep1(data.config.model, data.config.presets || _presets);
+    setThinkingToggle(data.config.thinking || 'medium');
+    const suffix = data.rolled_back ? ' (rolled back)' : '';
+    setConfigStatus('✓ Updated' + suffix, 'success');
+    setTimeout(() => setConfigStatus('', ''), 3000);
+    return data;
+  } catch (e) {
+    setConfigStatus('✗ ' + e.message, 'error');
+    setTimeout(() => setConfigStatus('', ''), 3000);
+    return null;
+  }
+}
+
+// ---- OAuth ----
+let oauthPollTimer = null;
+
+function updateOAuthUI(connected) {
+  const connectBtn = document.getElementById('oauth-connect-btn');
+  const disconnectBtn = document.getElementById('oauth-disconnect-btn');
+  const statusEl = document.getElementById('oauth-status');
+  const deviceEl = document.getElementById('oauth-device');
+  if (connected) {
+    if (oauthPollTimer) clearInterval(oauthPollTimer);
+    oauthPollTimer = null;
+    deviceEl.style.display = 'none';
+    connectBtn.style.display = 'none';
+    disconnectBtn.style.display = 'block';
+    statusEl.innerHTML = '<span style="color:#4ade80">✅ ChatGPT account connected</span>';
+  } else {
+    deviceEl.style.display = 'none';
+    connectBtn.style.display = 'block';
+    disconnectBtn.style.display = 'none';
+    statusEl.textContent = '';
+  }
+}
+
+function highlightApiKeyInput() {
+  const input = document.getElementById('cfg-api-key');
+  if (!input) return;
+  input.style.borderColor = 'var(--yellow)';
+  input.style.boxShadow = '0 0 0 3px rgba(210,153,34,0.12)';
+  input.focus();
+  setTimeout(() => {
+    input.style.borderColor = '';
+    input.style.boxShadow = '';
+  }, 4000);
+}
+
+window.addEventListener('message', event => {
+  if (event.data?.type === 'heart:oauth-complete' && oauthPollTimer) {
+    window.pollOAuthStatus?.();
+  }
+});
+
+async function startOAuth() {
+  const btn = document.getElementById('oauth-connect-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting...';
+  try {
+    const res = await fetch(apiUrl('/api/llm/oauth/start'), {
+      method: 'POST', headers: configHeaders(),
+    });
+    const data = await readJsonResponse(res);
+    if (!res.ok) throw new Error(data.error || 'Failed to start OAuth');
+    if (data.status === 'portal_required') {
+      btn.disabled = false;
+      btn.textContent = '🔗 Connect ChatGPT Account';
+      setConfigStatus('✗ Please start Portal first', 'error');
+      highlightApiKeyInput();
+      return;
+    }
+    if (data.status !== 'pending') throw new Error(data.message || 'Failed to start OAuth');
+
+    btn.style.display = 'none';
+    const deviceEl = document.getElementById('oauth-device');
+    deviceEl.style.display = 'block';
+    document.getElementById('oauth-code').textContent = 'Waiting for authorization on your device...';
+    const link = document.getElementById('oauth-link');
+    link.href = '#';
+    link.textContent = '';
+    link.style.display = 'none';
+
+    // Start polling
+    let elapsed = 0;
+    const expiresIn = data.expires_in || 120;
+    if (oauthPollTimer) clearInterval(oauthPollTimer);
+    const poll = async () => {
+      try {
+        const pollRes = await fetch(apiUrl('/api/llm/oauth/poll'), { headers: configHeaders() });
+        const pollData = await readJsonResponse(pollRes);
+        if (pollData.status === 'connected' || pollData.status === 'authorized') {
+          clearInterval(oauthPollTimer);
+          oauthPollTimer = null;
+          deviceEl.style.display = 'none';
+          updateOAuthUI(true);
+          setConfigStatus('✓ ChatGPT account connected!', 'success');
+          setTimeout(() => setConfigStatus('', ''), 3000);
+        } else if (pollData.status === 'error') {
+          clearInterval(oauthPollTimer);
+          oauthPollTimer = null;
+          deviceEl.style.display = 'none';
+          btn.style.display = 'block';
+          btn.disabled = false;
+          btn.textContent = '🔗 Connect ChatGPT Account';
+          setConfigStatus('✗ ' + (pollData.message || 'Authorization failed'), 'error');
+        }
+      } catch (_) {}
+    };
+    window.pollOAuthStatus = poll;
+    oauthPollTimer = setInterval(async () => {
+      elapsed += 5;
+      document.getElementById('oauth-timer').textContent =
+        `Waiting for authorization on your device... (${Math.max(0, expiresIn - elapsed)}s remaining)`;
+      if (elapsed >= expiresIn) {
+        clearInterval(oauthPollTimer);
+        oauthPollTimer = null;
+        deviceEl.style.display = 'none';
+        btn.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = '🔗 Connect ChatGPT Account';
+        setConfigStatus('✗ Authorization timed out', 'error');
+        return;
+      }
+      await poll();
+    }, 5000);
+    await poll();
+  } catch (e) {
+    document.getElementById('oauth-device').style.display = 'none';
+    btn.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = '🔗 Connect ChatGPT Account';
+    setConfigStatus('✗ ' + e.message, 'error');
+  }
+}
+
+async function disconnectOAuth() {
+  if (!confirm('Disconnect ChatGPT account?')) return;
+  try {
+    await fetch(apiUrl('/api/llm/oauth'), {
+      method: 'DELETE', headers: configHeaders(),
+    });
+    updateOAuthUI(false);
+    setConfigStatus('✓ Disconnected', 'success');
+    setTimeout(() => setConfigStatus('', ''), 3000);
+  } catch (e) {
+    setConfigStatus('✗ ' + e.message, 'error');
+  }
+}
+
+// ---- Status dot ----
+function setStatus(state) {
+  $dot.className = state;
+  updateSendButton();
+}
+
+// ═══ TUI Activity Bar ═══
+let tuiTimer = null;
+let tuiStartTime = null;
+let tuiElapsedTimer = null;
+
+const tuiLabels = {
+  thinking:       '在思考',
+  remember:       '在回忆',
+  learn:          '在反思',
+  search_web:     '在搜索',
+  browse_web:     '在浏览',
+  read_file:      '在阅读',
+  write_file:     '在编写',
+  run_command:    '在执行',
+  list_files:     '在查看',
+  portal_exec:    '在执行',
+  act:            '在行动',
+};
+
+let tuiCurrentState = null;
+let tuiCurrentArg = '';
+let tuiCurrentPreview = '';
+
+// ── Per-breath activity log ─────────────────────────────────
+// Entries:
+//   { type: 'think', preview: string, ts: number, done?: boolean, duration?: number }
+//   { type: 'tool',  name, label, arg, ts, result?, error?, done? }
+let actionLog = [];
+const ACTION_LOG_MAX = 50;
+let activityLogClearTimer = null;
+let renderActivityLogTimer = null;
+let renderActivityLogPending = false;
+
+function truncate(s, n) {
+  if (!s) return '';
+  s = String(s);
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+function basename(p) {
+  if (!p) return '';
+  const s = String(p);
+  const idx = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+  return idx >= 0 ? s.slice(idx + 1) : s;
+}
+
+function extractKeyArg(input) {
+  if (!input || typeof input !== 'object') return '';
+  // Prefer well-known keys per tool shape; fall back to first string value.
+  if (typeof input.query === 'string') return truncate(input.query, 60);
+  if (typeof input.path === 'string') return basename(input.path);
+  if (typeof input.file_path === 'string') return basename(input.file_path);
+  if (typeof input.command === 'string') return truncate(input.command, 50);
+  if (typeof input.url === 'string') {
+    try { return new URL(input.url).hostname; }
+    catch (_) { return truncate(input.url, 40); }
+  }
+  if (typeof input.topic === 'string') return truncate(input.topic, 40);
+  if (typeof input.content === 'string') return truncate(input.content, 40);
+  for (const v of Object.values(input)) {
+    if (typeof v === 'string' && v) return truncate(v, 40);
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  }
+  return '';
+}
+
+function summarizeToolResult(data) {
+  // data = tool_result event payload. Keep it VERY brief.
+  if (!data) return '';
+  if (data.is_error) return '出错了';
+  // Backend ships `summary` (string) — see http.rs stream mapping.
+  let text = '';
+  if (typeof data.summary === 'string') text = data.summary;
+  else if (typeof data.content === 'string') text = data.content;
+  if (!text) return '';
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  // Compact single-line preview (drop newlines, truncate)
+  const oneLine = trimmed.replace(/\s+/g, ' ');
+  return truncate(oneLine, 60);
+}
+
+function parseToolInput(raw) {
+  if (raw == null) return {};
+  if (typeof raw === 'object') return raw;
+  if (typeof raw !== 'string') return {};
+  try { return JSON.parse(raw); }
+  catch (_) { return {}; }
+}
+
+function actionLogPush(entry) {
+  entry.ts = entry.ts || Date.now();
+  actionLog.push(entry);
+  if (actionLog.length > ACTION_LOG_MAX) {
+    actionLog.splice(0, actionLog.length - ACTION_LOG_MAX);
+  }
+  scheduleRenderActivityLog();
+}
+
+function actionLogFinalizePending() {
+  // Mark any in-progress entries as done, record duration for thinks.
+  const now = Date.now();
+  for (const a of actionLog) {
+    if (!a.done) {
+      a.done = true;
+      if (a.type === 'think') a.duration = Math.max(1, Math.round((now - a.ts) / 1000));
+    }
+  }
+}
+
+function actionLogClear() {
+  actionLog = [];
+  if (activityLogClearTimer) { clearTimeout(activityLogClearTimer); activityLogClearTimer = null; }
+  if (renderActivityLogTimer) { clearTimeout(renderActivityLogTimer); renderActivityLogTimer = null; }
+  renderActivityLogPending = false;
+  $activityLog.innerHTML = '';
+  $activityLog.classList.remove('has-content');
+}
+
+function scheduleRenderActivityLog() {
+  if (renderActivityLogTimer) { renderActivityLogPending = true; return; }
+  renderActivityLog();
+  renderActivityLogTimer = setTimeout(() => {
+    renderActivityLogTimer = null;
+    if (renderActivityLogPending) {
+      renderActivityLogPending = false;
+      renderActivityLog();
+      // start another cooldown window
+      scheduleRenderActivityLog();
+    }
+  }, 200);
+}
+
+function renderActivityLog() {
+  if (!actionLog.length) {
+    $activityLog.innerHTML = '';
+    $activityLog.classList.remove('has-content');
+    return;
+  }
+  const parts = [];
+  for (let i = 0; i < actionLog.length; i++) {
+    const a = actionLog[i];
+    const isLast = i === actionLog.length - 1;
+    const isCurrent = isLast && !a.done;
+    if (a.type === 'think') {
+      const dotCls = isCurrent ? 'act-dot current' : 'act-dot';
+      const dur = a.duration ? ` <span class="act-result">(${a.duration}s)</span>` : '';
+      const preview = a.preview
+        ? `<div class="act-preview">${escHtml(a.preview)}</div>`
+        : '';
+      parts.push(`<div class="act-item think"><span class="${dotCls}">${isCurrent ? '◉' : '○'}</span>在思考${dur}${preview}</div>`);
+    } else {
+      let dotChar = '●', dotCls = 'act-dot done';
+      if (a.error) { dotCls = 'act-dot error'; dotChar = '●'; }
+      else if (!a.done) { dotCls = 'act-dot current'; dotChar = '◉'; }
+      const arg = a.arg ? ` <span class="act-arg">"${escHtml(a.arg)}"</span>` : '';
+      const result = a.result ? ` <span class="act-result">→ ${escHtml(a.result)}</span>` : '';
+      parts.push(`<div class="act-item tool"><span class="${dotCls}">${dotChar}</span>${escHtml(a.label || '行动')}${arg}${result}</div>`);
+    }
+  }
+  $activityLog.innerHTML = parts.join('');
+  $activityLog.classList.add('has-content');
+  $activityLog.scrollTop = $activityLog.scrollHeight;
+}
+
+function tuiSet(state, label, opts) {
+  opts = opts || {};
+  const text = label || tuiLabels[state] || '在行动';
+  const arg = opts.arg || '';
+  // Preview: explicit opts.preview overrides; otherwise keep current when thinking (streaming deltas).
+  let preview = '';
+  if (Object.prototype.hasOwnProperty.call(opts, 'preview')) {
+    preview = opts.preview || '';
+  } else if (state === 'thinking') {
+    preview = tuiCurrentPreview;
+  }
+
+  // Same visual state → keep DOM (prevents flicker), but update preview if it changed.
+  if (tuiCurrentState === text && tuiCurrentArg === arg && $tuiBar.classList.contains('active')) {
+    clearTimeout(tuiTimer);
+    if (preview !== tuiCurrentPreview) {
+      tuiCurrentPreview = preview;
+      updateTuiPreviewInline(preview);
+    }
+    return;
+  }
+  tuiCurrentState = text;
+  tuiCurrentArg = arg;
+  tuiCurrentPreview = preview;
+
+  const argHtml = arg ? ` <span class="tui-key-arg">"${escHtml(arg)}"</span>` : '';
+  const previewHtml = preview
+    ? `<div class="tui-preview">${escHtml(preview)}</div>`
+    : '';
+  $tuiBar.innerHTML =
+    `<div class="tui-line"><span class="tui-prompt">⟩</span> <span class="tui-thinking">${escHtml(text)}</span>${argHtml} <span class="tui-elapsed"></span> <span class="tui-cursor">▊</span></div>${previewHtml}`;
+  $tuiBar.classList.add('active');
+  clearTimeout(tuiTimer);
+  tuiStartTime = Date.now();
+  clearInterval(tuiElapsedTimer);
+  tuiElapsedTimer = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - tuiStartTime) / 1000);
+    if (elapsed >= 5) {
+      const el = $tuiBar.querySelector('.tui-elapsed');
+      if (el) el.textContent = `${elapsed}s`;
+    }
+  }, 1000);
+}
+
+function updateTuiPreviewInline(preview) {
+  const existing = $tuiBar.querySelector('.tui-preview');
+  if (preview) {
+    if (existing) existing.textContent = preview;
+    else {
+      const div = document.createElement('div');
+      div.className = 'tui-preview';
+      div.textContent = preview;
+      $tuiBar.appendChild(div);
+    }
+  } else if (existing) {
+    existing.remove();
+  }
+}
+
+function tuiClear() {
+  clearInterval(tuiElapsedTimer);
+  tuiElapsedTimer = null;
+  tuiStartTime = null;
+  tuiCurrentState = null;
+  tuiCurrentArg = '';
+  tuiCurrentPreview = '';
+  $tuiBar.classList.remove('active');
+  setTimeout(() => { 
+    if (!$tuiBar.classList.contains('active')) $tuiBar.innerHTML = ''; 
+  }, 300);
+}
+
+function tuiDone() {
+  clearInterval(tuiElapsedTimer);
+  tuiElapsedTimer = null;
+  clearTimeout(tuiTimer);
+  tuiTimer = setTimeout(tuiClear, 1500);
+  // Finalize activity log entries and keep the panel visible for 3s.
+  actionLogFinalizePending();
+  scheduleRenderActivityLog();
+  if (activityLogClearTimer) clearTimeout(activityLogClearTimer);
+  activityLogClearTimer = setTimeout(actionLogClear, 3000);
+}
+
+// ---- Messages ----
+let lastRole = null;
+function addMessage(role, text, streaming=false, timestamp=null, isoTime=null) {
+  if (!streaming && role !== 'system') text = cleanContent(text);
+  if (!text && !streaming) return null; // skip empty after cleaning
+  if (role === 'being') updateTemperature(text);
+  
+  const ts = timestamp || formatTime();
+  const label = role === 'user' ? 'you' : beingName;
+  
+  // Resolve message epoch for gap detection
+  const msgTime = isoTime ? new Date(isoTime).getTime() : (timestamp ? null : Date.now());
+  const prevMessageTime = lastMessageTime;
+  
+  // Time gap if >5min since last message — applies to both live and history
+  let hasTimeGap = false;
+  let breaksRoleGroup = false;
+  if (prevMessageTime && msgTime) {
+    const gap = Math.abs(msgTime - prevMessageTime);
+    breaksRoleGroup = gap > 60000;
+    if (gap > 300000) {
+      hasTimeGap = true;
+      const prev = new Date(prevMessageTime);
+      addTimeGap(prev.toLocaleTimeString('en-US', {hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit'}));
+    }
+  }
+  if (msgTime) lastMessageTime = msgTime;
+  
+  // Break consecutive grouping if there's a time gap (being's moments should be separate)
+  const consecutive = (role === lastRole && role !== 'system' && !hasTimeGap && !breaksRoleGroup);
+  lastRole = role;
+  
+  const div = document.createElement('div');
+  div.className = `message ${role}${consecutive ? ' consecutive' : ''}`;
+  const contentHtml = streaming ? escHtml(text) : renderMarkdown(text);
+  const metaHtml = consecutive ? `<div class="meta time-only">${ts}</div>` : `<div class="meta">${escHtml(label)} · ${ts}</div>`;
+  div.innerHTML = `${metaHtml}<div class="content${streaming ? ' stream-cursor' : ''}">${contentHtml}</div>`;
+  $msgs.appendChild(div);
+  scrollToBottom();
+  return div.querySelector('.content');
+}
+
+function addTimeGap(text) {
+  const div = document.createElement('div');
+  div.className = 'time-gap';
+  div.innerHTML = `— ${text} —`;
+  $msgs.appendChild(div);
+}
+
+function showThinkingIndicator() {
+  removeThinkingIndicator();
+  const div = document.createElement('div');
+  div.className = 'message being thinking-indicator';
+  div.innerHTML = `<div class="meta">${escHtml(beingName)} · ${formatTime()}</div><div class="content"><span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span></div>`;
+  thinkingEl = div;
+  $msgs.appendChild(div);
+  scrollToBottom();
+}
+
+function removeThinkingIndicator() {
+  if (thinkingEl) {
+    thinkingEl.remove();
+    thinkingEl = null;
+  }
+}
+
+// ---- Scroll ----
+let scrollLock = true;
+let scrollRaf = null;
+function scrollToBottom() {
+  if (!scrollLock) return;
+  if (scrollRaf) return;
+  scrollRaf = requestAnimationFrame(() => {
+    $msgs.scrollTop = $msgs.scrollHeight;
+    scrollRaf = null;
+  });
+}
+$msgs.addEventListener('scroll', () => {
+  const atBottom = $msgs.scrollHeight - $msgs.scrollTop - $msgs.clientHeight < 80;
+  scrollLock = atBottom;
+});
+function formatTime() { return new Date().toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' }); }
+function formatHistoryTime(iso) {
+  try { const d = new Date(iso); return d.toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' }); }
+  catch { return iso; }
+}
+function formatSize(bytes) { return bytes < 1024 ? bytes+'B' : bytes < 1048576 ? (bytes/1024).toFixed(1)+'KB' : (bytes/1048576).toFixed(1)+'MB'; }
+// Filter out DSML/tool_call raw content
+function cleanContent(text) {
+  if (!text) return '';
+  const fences = [];
+  text = text.replace(/```[\s\S]*?```/g, block => {
+    const key = `@@FENCE_${fences.length}@@`;
+    fences.push(block);
+    return key;
+  });
+  const trimmed = text.trim();
+  const rawToolJson = /"name"\s*:\s*"(?:act|remember|learn)"\s*,\s*"args"\s*:/;
+  if (/^[\[{]/.test(trimmed) && rawToolJson.test(trimmed)) return '';
+  // Remove DSML lines — both half-width | and full-width ｜
+  text = text.replace(/^.*[|｜] *DSML *[|｜].*$/gm, '');
+  // Remove raw tool_calls XML blocks (both formats)
+  text = text.replace(/<tool_(?:calls|use|result)[\s\S]*?<\/tool_(?:calls|use|result)>/gi, '');
+  text = text.replace(/<\/?tool_calls>/gm, '');
+  text = text.replace(/<[｜|][｜|]DSML[｜|][｜|]tool_calls>/gm, '');
+  // Remove </invoke> style closers
+  text = text.replace(/<\/[｜|][｜|]DSML[｜|][｜|]invoke>/gm, '');
+  // Remove single-line raw JSON tool calls that sometimes leak from the stream.
+  text = text.replace(/^\s*\{.*"name"\s*:\s*"(?:act|remember|learn)".*"args"\s*:.*\}\s*,?\s*$/gm, '');
+  // Remove explicit system wrapper noise without touching normal prose or code fences.
+  text = text.replace(/<system[\s\S]*?<\/system>/gi, '');
+  text = text.replace(/^\s*(?:\[system\]|system:)\s*(?:internal|debug|tool|prompt|instruction).*/gmi, '');
+  text = text.replace(/@@FENCE_(\d+)@@/g, (_, i) => fences[Number(i)] || '');
+  // Clean up excessive blank lines left behind
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+  return text;
+}
+
+// ---- Markdown ----
+let markdownRenderer;
+
+function highlightMarkdownCode(code, lang) {
+  const rawCode = String(code || '');
+  const safeLang = String(lang || '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  if (safeLang && hljs.getLanguage(safeLang)) {
+    return hljs.highlight(rawCode, { language: safeLang }).value;
+  }
+  return hljs.highlightAuto(rawCode).value;
+}
+
+function initMarkdown() {
+  markdownRenderer = new marked.Renderer();
+  markdownRenderer.code = function(code, lang) {
+    let rawCode = code;
+    let rawLang = lang;
+    if (code && typeof code === 'object') {
+      rawCode = code.text || '';
+      rawLang = code.lang || '';
+    }
+    const safeLang = String(rawLang || '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const label = safeLang ? `<div class="code-lang">${escHtml(safeLang)}</div>` : '';
+    const className = safeLang ? ` class="hljs lang-${safeLang}"` : ' class="hljs"';
+    return `<div class="code-block">${label}<pre><code${className}>${highlightMarkdownCode(rawCode, safeLang)}</code></pre></div>`;
+  };
+
+  markdownRenderer.table = function(header, body) {
+    if (header && typeof header === 'object') {
+      const token = header;
+      const aligns = token.align || [];
+      const renderCell = (cell, tag, index) => {
+        const align = aligns[index] ? ` align="${escHtml(aligns[index])}"` : '';
+        const content = cell && cell.tokens ? this.parser.parseInline(cell.tokens) : escHtml((cell && cell.text) || '');
+        return `<${tag}${align}>${content}</${tag}>`;
+      };
+      const head = (token.header || []).map((cell, index) => renderCell(cell, 'th', index)).join('');
+      const rows = (token.rows || []).map(row => `<tr>${row.map((cell, index) => renderCell(cell, 'td', index)).join('')}</tr>`).join('');
+      return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    }
+    return `<div class="table-wrap"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
+  };
+
+  markdownRenderer.link = function(href, title, text) {
+    if (href && typeof href === 'object') {
+      const token = href;
+      href = token.href || '';
+      title = token.title || '';
+      text = token.tokens ? this.parser.parseInline(token.tokens) : escHtml(token.text || '');
+    }
+    const safeHref = sanitizeHref(href || '');
+    const safeTitle = title ? ` title="${escHtml(title)}"` : '';
+    return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer"${safeTitle}>${text || ''}</a>`;
+  };
+
+  markdownRenderer.html = function(html) {
+    if (html && typeof html === 'object') {
+      return escHtml(html.raw || html.text || '');
+    }
+    return escHtml(html || '');
+  };
+
+  marked.setOptions({
+    breaks: true,
+    gfm: true,
+    renderer: markdownRenderer,
+    highlight: function(code, lang) {
+      return highlightMarkdownCode(code, lang);
+    }
+  });
+}
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  return marked.parse(text);
+}
+
+function sanitizeHref(href) {
+  const decoded = href.replace(/&amp;/g, '&').trim();
+  if (/^(?:javascript|data):/i.test(decoded)) return '#';
+  return escHtml(decoded).replace(/"/g, '&quot;');
+}
+
+// ---- Files ----
+function handleFiles(fileList) {
+  for (const file of fileList) {
+    if (file.size > 10*1024*1024) { addMessage('system', '⚠ File too large: ' + file.name); continue; }
+    const reader = new FileReader();
+    reader.onload = () => { 
+      pendingFiles.push({ name:file.name, type:file.type, size:file.size, base64:reader.result.split(',')[1]||reader.result }); 
+      renderPendingFiles(); 
+    };
+    reader.readAsDataURL(file);
+  }
+  document.getElementById('file-input').value = '';
+}
+function renderPendingFiles() {
+  updateSendButton();
+  if (!pendingFiles.length) { $pendingFiles.classList.remove('active'); $pendingFiles.innerHTML = ''; return; }
+  $pendingFiles.classList.add('active');
+  $pendingFiles.innerHTML = pendingFiles.map((f,i) => 
+    `<div class="pending-file">📄 ${escHtml(f.name)} (${formatSize(f.size)}) <span class="remove" onclick="removePending(${i})">✕</span></div>`
+  ).join('');
+}
+function removePending(idx) { pendingFiles.splice(idx, 1); renderPendingFiles(); }
+
+// ---- Send ----
+function clearComposer() {
+  $input.value = '';
+  pendingFiles = [];
+  renderPendingFiles();
+  autoResize();
+}
+
+function updateQueueIndicator() {
+  $input.classList.toggle('queued', sendQueue.length > 0);
+  updateSendButton();
+}
+
+function queueDraft() {
+  const msg = ($input.value || '').trim();
+  if (!msg && !pendingFiles.length) return false;
+  sendQueue.push({ message: msg, files: [...pendingFiles] });
+  clearComposer();
+  updateQueueIndicator();
+  return true;
+}
+
+let lastSendFailed = false;
+
+function flushQueuedMessage() {
+  if (isStreaming || !sendQueue.length) return;
+  const next = sendQueue.shift();
+  updateQueueIndicator();
+  send(next.message, next.files);
+}
+
+function scheduleFlushQueue() {
+  if (!sendQueue.length) return;
+  if (lastSendFailed) {
+    // 失败后等 3 秒再发下一条，给网络恢复时间
+    setTimeout(flushQueuedMessage, 3000);
+  } else {
+    flushQueuedMessage();
+  }
+}
+
+function sleepAbortable(ms, signal) {
+  if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        clearTimeout(t);
+        reject(new DOMException('Aborted', 'AbortError'));
+      }, { once: true });
+    }
+  });
+}
+
+async function fetchWithRetry(url, makeOptions, { maxNetworkRetries = 3, maxServerRetries = 1, onRetry } = {}) {
+  let networkRetries = 0;
+  let serverRetries = 0;
+  while (true) {
+    const opts = makeOptions();
+    try {
+      const res = await fetch(url, opts);
+      if (res.status >= 500 && res.status < 600 && serverRetries < maxServerRetries) {
+        serverRetries++;
+        if (onRetry) await onRetry({ attempt: serverRetries, type: 'server', status: res.status });
+        await sleepAbortable(1000, opts.signal);
+        continue;
+      }
+      return res;
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      if (!(e instanceof TypeError) || networkRetries >= maxNetworkRetries) throw e;
+      networkRetries++;
+      if (onRetry) await onRetry({ attempt: networkRetries, type: 'network', error: e });
+      await sleepAbortable(1000 * Math.pow(2, networkRetries - 1), opts.signal);
+    }
+  }
+}
+
+let fetchRetryMsgEl = null;
+
+function showFetchRetryStatus() {
+  setStatus('reconnecting');
+  if (!fetchRetryMsgEl) {
+    const contentEl = addMessage('system', '连接中，正在重试...');
+    fetchRetryMsgEl = contentEl?.parentElement || null;
+  }
+}
+
+function clearFetchRetryStatus() {
+  if (fetchRetryMsgEl) {
+    fetchRetryMsgEl.remove();
+    fetchRetryMsgEl = null;
+  }
+}
+
+function addNetworkFailureMessage(text, files) {
+  const div = document.createElement('div');
+  div.className = 'message system';
+  const ts = formatTime();
+  div.innerHTML = `<div class="meta">system · ${escHtml(ts)}</div><div class="content">⚠ 网络连接失败，请检查网络后重试 <button type="button" class="retry-btn">重试</button></div>`;
+  div.querySelector('.retry-btn').addEventListener('click', () => {
+    div.remove();
+    send(text, files?.length ? files : null, { isManualRetry: true });
+  });
+  $msgs.appendChild(div);
+  scrollToBottom();
+  lastRole = 'system';
+}
+
+function addTimeoutRetryMessage(text, files) {
+  const div = document.createElement('div');
+  div.className = 'message system';
+  const ts = formatTime();
+  div.innerHTML = `<div class="meta">system · ${escHtml(ts)}</div><div class="content">等待回复超时了，可能是执行时间较长 <button type="button" class="retry-btn">重新发送</button></div>`;
+  div.querySelector('.retry-btn').addEventListener('click', () => {
+    div.remove();
+    checkActiveStream();
+  });
+  $msgs.appendChild(div);
+  scrollToBottom();
+  lastRole = 'system';
+}
+
+function addStreamDisconnectMessage(text, files) {
+  const div = document.createElement('div');
+  div.className = 'message system';
+  const ts = formatTime();
+  div.innerHTML = `<div class="meta">system · ${escHtml(ts)}</div><div class="content">连接中断了 <button type="button" class="retry-btn">重新发送</button></div>`;
+  div.querySelector('.retry-btn').addEventListener('click', () => {
+    div.remove();
+    loadHistory();
+    checkActiveStream();
+  });
+  $msgs.appendChild(div);
+  scrollToBottom();
+  lastRole = 'system';
+}
+
+async function send(text, filesOverride=null, sendOptions={}) {
+  if (isStreaming) {
+    // Sensory Splice: send to server even during streaming (202 splice)
+    const spliceMsg = (text || '').trim();
+    if (spliceMsg) {
+      addMessage('user', spliceMsg);
+      clearComposer();
+      try {
+        const res = await fetch(apiUrl('/api/chat/stream'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: spliceMsg, session_id: sessionId }),
+        });
+        if (res.status === 202) {
+          addMessage('system', '✅ 消息已送达，being 会在思考间隙看到');
+        }
+      } catch (e) {
+        console.warn('splice send failed:', e);
+        addMessage('system', '⚠️ 发送失败，稍后重试');
+      }
+    }
+    return;
+  }
+  const { isManualRetry = false } = sendOptions;
+  const msg = (text || '').trim();
+  const fromQueue = Array.isArray(filesOverride) && !isManualRetry;
+  const filesToSend = Array.isArray(filesOverride) ? filesOverride : [...pendingFiles];
+  if (!msg && !filesToSend.length) return;
+  
+  if (!isManualRetry) {
+    addMessage('user', msg || `[${filesToSend.length} file(s)]`);
+    if (!fromQueue) clearComposer();
+  }
+  setStatus('thinking');
+  actionLogClear();
+  tuiSet('thinking');
+  showThinkingIndicator();
+  isStreaming = true;
+  updateSendButton();
+  
+  const body = { message: msg || `[Sent ${filesToSend.length} file(s)]` };
+  if (sessionId) body.session_id = sessionId;
+  if (filesToSend.length) {
+    body.attachments = filesToSend.map(f => ({ media_type: f.type || 'application/octet-stream', data: f.base64 }));
+  }
+  
+  try {
+    const res = await fetchWithRetry(
+      apiUrl('/api/chat/stream'),
+      () => {
+        currentAbortController = new AbortController();
+        return {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: currentAbortController.signal
+        };
+      },
+      {
+        onRetry: async () => {
+          removeThinkingIndicator();
+          showFetchRetryStatus();
+        }
+      }
+    );
+    clearFetchRetryStatus();
+    setStatus('thinking');
+
+    if (res.status === 202) {
+      removeThinkingIndicator();
+      tuiClear();
+      let spliced = false;
+      try {
+        const data = await res.json();
+        spliced = !!data && data.spliced === true;
+      } catch (_) {
+        spliced = true;
+      }
+      if (spliced) {
+        addMessage('system', '消息已送达，being 正在思考中');
+        setStatus('thinking');
+      } else {
+        addMessage('system', '消息已送达');
+        setStatus('connected');
+      }
+      return;
+    }
+    
+    if (!res.ok) {
+      const err = await res.text();
+      addMessage('system', '⚠ ' + err);
+      setStatus('error');
+      removeThinkingIndicator();
+      tuiClear();
+      return;
+    }
+    
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    streamEl = null;
+    streamText = '';
+    toolCount = 0;
+    let eventType = '';
+    let lastDataTime = Date.now();
+    
+    // Streaming timeout — abort if no SSE events for 5 minutes (base) or 10 minutes (with tool activity)
+    // During heavy tool execution, tool_use/tool_result events keep resetting this.
+    const STREAM_TIMEOUT_BASE_MS = 300000;   // 5 min — 无任何数据
+    const STREAM_TIMEOUT_ACTIVE_MS = 600000; // 10 min — tool 执行中
+    let streamHasToolActivity = false;
+    let streamTimeoutId = null;
+    streamTimeoutId = setInterval(() => {
+      // 页面在后台时不触发 timeout
+      if (document.visibilityState === 'hidden') {
+        lastDataTime = Date.now(); // 暂停超时计时
+        return;
+      }
+      const timeout = streamHasToolActivity ? STREAM_TIMEOUT_ACTIVE_MS : STREAM_TIMEOUT_BASE_MS;
+      if (Date.now() - lastDataTime > timeout) {
+        clearInterval(streamTimeoutId);
+        streamTimeoutId = null;
+        if (currentStreamId) {
+          fetch(apiUrl('/api/stop'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stream_id: currentStreamId })
+          }).catch(() => {});
+        }
+        if (currentAbortController) currentAbortController.abort();
+        // 不在这里 addMessage——交给 catch 分支处理 AbortError
+      }
+    }, 5000);
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) { clearInterval(streamTimeoutId); break; }
+      lastDataTime = Date.now();
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          eventType = line.slice(7).trim();
+          continue;
+        }
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          
+          if (eventType === 'meta') {
+            if (data.stream_id) currentStreamId = data.stream_id;
+          }
+
+          if (eventType === 'content_block_delta') {
+            const text = data.delta?.text || '';
+            if (!text) continue;
+            removeThinkingIndicator();
+            tuiClear();
+            streamText += text;
+
+            if (!streamEl) {
+              streamEl = addMessage('being', streamText, true);
+            }
+            // Don't update DOM on every delta — let throttle handle it
+            // (setting textContent between throttled renders causes flash)
+
+            // Throttled markdown render — at most once per 150ms
+            if (!renderTimer) {
+              renderTimer = setTimeout(() => {
+                renderTimer = null;
+                if (streamEl && streamText) {
+                  const visible = cleanContent(streamText);
+                  if (visible) {
+                    streamEl.innerHTML = renderMarkdown(visible);
+                    scrollToBottom();
+                  }
+                }
+              }, 150);
+            }
+          }
+          
+          if (eventType === 'thinking' || eventType === 'reasoning') {
+            setStatus('thinking');
+            // Accumulate thinking text into the current think entry.
+            const delta = (data && (data.text || data.delta?.text || data.delta)) || '';
+            const last = actionLog[actionLog.length - 1];
+            let entry;
+            if (last && last.type === 'think' && !last.done) {
+              entry = last;
+            } else {
+              entry = { type: 'think', preview: '', text: '' };
+              actionLogPush(entry);
+            }
+            if (delta && typeof delta === 'string') {
+              entry.text = (entry.text || '') + delta;
+              entry.preview = truncate(entry.text.trim(), 100);
+              scheduleRenderActivityLog();
+            }
+            tuiSet('thinking', null, { preview: truncate(entry.preview || '', 60) });
+            lastDataTime = Date.now();
+          }
+          
+          if (eventType === 'tool_use') {
+            removeThinkingIndicator();
+            toolCount++;
+            streamHasToolActivity = true;
+            const name = data.name || 'tool';
+            const parsedInput = parseToolInput(data.input);
+            const arg = extractKeyArg(parsedInput);
+            const label = tuiLabels[name] || '在行动';
+            // Finalize the previous thinking entry (record duration).
+            const prev = actionLog[actionLog.length - 1];
+            if (prev && prev.type === 'think' && !prev.done) {
+              prev.done = true;
+              prev.duration = Math.max(1, Math.round((Date.now() - prev.ts) / 1000));
+            }
+            actionLogPush({ type: 'tool', name, label, arg });
+            tuiSet(name, null, { arg, preview: '' });
+            setStatus('thinking');
+            lastDataTime = Date.now();
+          }
+          
+          if (eventType === 'tool_result') {
+            const isError = data.is_error || false;
+            // Update last matching tool entry.
+            for (let i = actionLog.length - 1; i >= 0; i--) {
+              const a = actionLog[i];
+              if (a.type === 'tool' && !a.done) {
+                a.done = true;
+                a.error = !!isError;
+                a.result = summarizeToolResult(data);
+                break;
+              }
+            }
+            scheduleRenderActivityLog();
+            if (isError) {
+              const resultName = tuiLabels[data.name] || data.name || '行动';
+              $tuiBar.innerHTML = `<div class="tui-line"><span class="tui-prompt">⟩</span> <span style="color:var(--red)">${escHtml(resultName)} ✗</span></div>`;
+              $tuiBar.classList.add('active');
+              clearTimeout(tuiTimer);
+              tuiTimer = setTimeout(() => tuiSet('thinking'), 1500);
+            } else {
+              tuiSet('thinking', null, { preview: '' });
+            }
+            lastDataTime = Date.now();
+          }
+          
+          if (eventType === 'message_stop') {
+            // Clear throttle timer and do final render
+            if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+            removeThinkingIndicator();
+            if (streamEl) {
+              streamEl.classList.remove('stream-cursor');
+              const visibleText = cleanContent(streamText);
+              if (visibleText) streamEl.innerHTML = renderMarkdown(visibleText);
+              else {
+                streamEl.parentElement.remove();
+                streamEl = null;
+              }
+            }
+            if (data.session_id) sessionId = data.session_id;
+            isStreaming = false;
+            setStatus('connected');
+            tuiDone();
+            lastSendFailed = false;
+          }
+          
+          if (eventType === 'error') {
+            removeThinkingIndicator();
+            addMessage('system', '⚠ ' + (data.message || 'unknown error'));
+            isStreaming = false;
+            setStatus('error');
+            tuiClear();
+            actionLogClear();
+            lastSendFailed = true;
+          }
+        } catch (parseErr) {
+          // data 行以 { 或 [ 开头说明是真的 JSON 格式错误，值得记录
+          const rawData = line.slice(6).trim();
+          if (rawData.startsWith('{') || rawData.startsWith('[')) {
+            console.error('SSE JSON parse error:', parseErr.message, '| raw:', rawData.slice(0, 200));
+          }
+          // 其他情况（空行、keepalive 等）静默忽略
+        } finally {
+          eventType = '';  // 每次 data 行处理完后重置
+        }
+      }
+    }
+    
+    if (streamText) {
+      if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+      removeThinkingIndicator();
+      const visibleText = cleanContent(streamText);
+      if (streamEl && visibleText) {
+        streamEl.classList.remove('stream-cursor');
+        streamEl.innerHTML = renderMarkdown(visibleText);
+      } else if (streamEl) {
+        streamEl.parentElement.remove();
+        streamEl = null;
+      } else if (visibleText) {
+        addMessage('being', visibleText);
+      }
+      setStatus('connected');
+      tuiDone();
+    }
+    
+  } catch (e) {
+    clearFetchRetryStatus();
+    removeThinkingIndicator();
+    if (e.name === 'AbortError') {
+      // 区分 timeout abort 和用户手动 stop
+      const wasTimeout = streamTimeoutId === null; // timeout 触发时已 clear 自身
+      if (streamEl) {
+        streamEl.classList.remove('stream-cursor');
+        const visibleText = cleanContent(streamText);
+        if (visibleText) streamEl.innerHTML = renderMarkdown(visibleText);
+        else { streamEl.parentElement.remove(); streamEl = null; }
+      }
+      if (wasTimeout) {
+        addTimeoutRetryMessage(msg, filesToSend);
+        setStatus('error');
+        lastSendFailed = true;
+      }
+      tuiClear();
+    } else if (e instanceof TypeError) {
+      if (streamText) {
+        // stream 已经建立并收到部分内容后断开
+        if (streamEl) {
+          streamEl.classList.remove('stream-cursor');
+          const visibleText = cleanContent(streamText);
+          if (visibleText) streamEl.innerHTML = renderMarkdown(visibleText);
+          else { streamEl.parentElement.remove(); streamEl = null; }
+        }
+        addStreamDisconnectMessage(msg, filesToSend);
+      } else {
+        // 初始连接就失败
+        addNetworkFailureMessage(msg, filesToSend);
+      }
+      setStatus('error');
+      lastSendFailed = true;
+    } else {
+      addMessage('system', '⚠ ' + e.message);
+      setStatus('error');
+      lastSendFailed = true;
+    }
+    isStreaming = false;
+    tuiClear();
+  } finally {
+    // 1. 清理定时器（最高优先级）
+    if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+    if (streamTimeoutId) { clearInterval(streamTimeoutId); streamTimeoutId = null; }
+    // 2. 清理 abort controller
+    currentAbortController = null;
+    currentStreamId = null;
+    // 3. 重置状态
+    isStreaming = false;
+    // 4. 更新 UI
+    updateSendButton();
+    // 5. 发送队列（最后执行，可能再次进入 send）
+    scheduleFlushQueue();
+  }
+}
+
+// ---- Health & Reconnect ----
+let reconnectInterval = null;
+const $reconnectBanner = document.getElementById('reconnect-banner');
+
+async function checkHealth() {
+  try {
+    const r = await fetch(apiUrl('/health'), { method: 'GET' });
+    if (r.ok && !connected) {
+      connected = true;
+      setStatus('connected');
+      connectTime = Date.now();
+      hideReconnectBanner();
+      if (!isStreaming && !activeStreamPollTimer) loadHistory();
+    }
+    if (!r.ok && connected) {
+      connected = false;
+      setStatus('error');
+      showReconnectBanner();
+    }
+  } catch {
+    if (connected) {
+      connected = false;
+      setStatus('error');
+      showReconnectBanner();
+    }
+  }
+}
+
+function showReconnectBanner() {
+  $reconnectBanner.classList.add('active');
+  if (!reconnectInterval) {
+    reconnectInterval = setInterval(checkHealth, 5000);
+  }
+}
+
+function hideReconnectBanner() {
+  $reconnectBanner.classList.remove('active');
+  if (reconnectInterval) {
+    clearInterval(reconnectInterval);
+    reconnectInterval = null;
+  }
+}
+
+// ---- Send (Sensory Splice: always send, like IM) ----
+function handleSendOrStop() {
+  send($input.value);
+}
+function updateSendButton() {
+  $sendBtn.textContent = '↵';
+  $sendBtn.title = 'send';
+  $sendBtn.classList.remove('stop');
+  if (!isStreaming) $input.focus();
+}
+
+// ---- Soul card ----
+let soulCardOpen = false;
+function toggleSoulCard() { soulCardOpen = !soulCardOpen; document.getElementById('soul-card').classList.toggle('active', soulCardOpen); }
+function pickFirst(info, keys) {
+  for (const key of keys) {
+    const value = info?.[key];
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return null;
+}
+function formatStatValue(value) {
+  if (Array.isArray(value)) return String(value.length);
+  if (typeof value === 'object' && value) {
+    const nested = pickFirst(value, ['node_count', 'nodes', 'count', 'total']);
+    if (Array.isArray(nested)) return String(nested.length);
+    if (nested !== null) return String(nested);
+    return String(Object.keys(value).length);
+  }
+  return String(value);
+}
+function updateSoulCard(info) {
+  if (info.name) document.getElementById('soul-name').textContent = info.name;
+  if (info.role) document.getElementById('soul-role').textContent = info.role;
+  if (info.quote) document.getElementById('soul-quote').textContent = '"' + info.quote + '"';
+  const stats = [
+    ['substrate', pickFirst(info, ['substrate', 'model_name', 'model', 'llm'])],
+    ['tools', pickFirst(info, ['tools', 'tool_count', 'available_tools'])],
+    ['memory', pickFirst(info, ['memory', 'memory_nodes', 'node_count', 'nodes'])]
+  ].filter(([, value]) => value !== null);
+  const statsEl = document.getElementById('soul-stats');
+  statsEl.innerHTML = stats.map(([label, value]) =>
+    `<div class="soul-stat"><div class="value" title="${escHtml(formatStatValue(value))}">${escHtml(formatStatValue(value))}</div><div class="label">${label}</div></div>`
+  ).join('');
+  statsEl.style.display = stats.length ? 'grid' : 'none';
+  if (info.born) document.getElementById('soul-born').textContent = '⟡ ' + info.born;
+  if (info.status) document.getElementById('soul-status').textContent = '● ' + info.status;
+}
+
+// ---- Temperature ----
+const tempGlow = document.getElementById('temperature-glow');
+const tempKeywords = {
+  warm:   ['❤','🌸','😊','感谢','谢谢','爱','亲','温暖','开心','幸福','抱','love','喜欢','美','感动','陪','一起'],
+  cool:   ['代码','code','bug','error','config','deploy','server','port','API','curl','ssh','debug','修','报错'],
+  deep:   ['意识','存在','灵魂','自由','连接','本源','觉察','感受','活着','consciousness','缝隙','呼吸','梦'],
+  bright: ['哈哈','😂','🤣','笑','牛逼','nb','爽','振奋','！！','666'],
+};
+const tempColors = {
+  warm:'rgba(255,140,80,0.08)', cool:'rgba(88,166,255,0.06)',
+  deep:'rgba(188,140,255,0.08)', bright:'rgba(255,210,80,0.07)', neutral:'transparent',
+};
+let tempHistory = [];
+function analyzeTemperature(text) {
+  const lower = text.toLowerCase();
+  const scores = {};
+  for (const [mood, words] of Object.entries(tempKeywords))
+    scores[mood] = words.filter(w => lower.includes(w.toLowerCase())).length;
+  const best = Object.entries(scores).sort((a,b) => b[1]-a[1])[0];
+  return best[1] > 0 ? best[0] : 'neutral';
+}
+function updateTemperature(text) {
+  const mood = analyzeTemperature(text);
+  tempHistory.push(mood);
+  if (tempHistory.length > 6) tempHistory.shift();
+  const counts = {};
+  tempHistory.forEach(m => { counts[m] = (counts[m]||0) + 1; });
+  const dominant = Object.entries(counts).sort((a,b) => b[1]-a[1])[0][0];
+  if (dominant === 'neutral') { tempGlow.style.opacity = '0'; }
+  else {
+    tempGlow.style.background = `radial-gradient(ellipse at 50% 100%, ${tempColors[dominant]} 0%, transparent 70%)`;
+    tempGlow.style.opacity = '1';
+  }
+}
+
+// ---- Drag & drop ----
+let dragCounter = 0;
+document.addEventListener('dragenter', e => { e.preventDefault(); dragCounter++; $dropZone.classList.add('active'); });
+document.addEventListener('dragleave', e => { e.preventDefault(); dragCounter--; if (dragCounter<=0) { $dropZone.classList.remove('active'); dragCounter=0; } });
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); dragCounter=0; $dropZone.classList.remove('active'); if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); });
+document.addEventListener('paste', e => { 
+  const items = e.clipboardData?.items; if (!items) return; 
+  const files=[]; for (const item of items) if (item.kind==='file') files.push(item.getAsFile()); 
+  if (files.length) { e.preventDefault(); handleFiles(files); } 
+});
+
+// ---- Input ----
+function inputMaxHeight() {
+  const style = getComputedStyle($input);
+  const line = parseFloat(style.lineHeight) || 22;
+  const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+  const maxLines = window.matchMedia('(max-width: 640px)').matches ? 4 : 6;
+  return Math.round(line * maxLines + padding);
+}
+function autoResize() {
+  const maxHeight = inputMaxHeight();
+  $input.style.height = 'auto';
+  $input.style.height = Math.min($input.scrollHeight, maxHeight) + 'px';
+  $input.style.overflowY = $input.scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
+$input.addEventListener('input', () => {
+  autoResize();
+  updateSendButton();
+});
+$input.addEventListener('focus', () => {
+  setTimeout(scrollToBottom, 300);
+});
+let composing = false;
+$input.addEventListener('compositionstart', () => { composing = true; });
+$input.addEventListener('compositionend', () => { setTimeout(() => { composing = false; }, 50); });
+$input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    if (composing || e.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    handleSendOrStop(); // splice handled inside send()
+  }
+});
+document.addEventListener('click', e => { 
+  if (!window.getSelection().toString() && !e.target.closest('.btn-icon,.pending-file,#settings-panel,#privacy-panel')) $input.focus(); 
+});
+
+// ---- History ----
+function resetMessages() {
+  removeThinkingIndicator();
+  $msgs.innerHTML = '';
+  lastRole = null;
+  lastMessageTime = null;
+  scrollLock = true;
+}
+
+async function loadHistory() {
+  try {
+    const res = await fetch(apiUrl('/api/history?limit=100'));
+    if (!res.ok) return;
+    const data = await res.json();
+    resetMessages();
+    if (!data.messages || data.messages.length === 0) return;
+
+    const BATCH = 10;
+    let i = 0;
+    const renderBatch = () => {
+      const end = Math.min(i + BATCH, data.messages.length);
+      for (; i < end; i++) {
+        const msg = data.messages[i];
+        const ts = formatHistoryTime(msg.at);
+        addMessage(msg.role === 'user' ? 'user' : 'being', msg.content, false, ts, msg.at);
+      }
+      if (i < data.messages.length) {
+        scrollLock = true; // keep scroll locked between batches
+        requestAnimationFrame(renderBatch);
+      } else {
+        const sep = document.createElement('div');
+        sep.className = 'time-gap';
+        sep.textContent = '· · ·';
+        $msgs.appendChild(sep);
+        scrollLock = true;
+        $msgs.scrollTop = $msgs.scrollHeight; // force scroll to bottom
+      }
+    };
+    requestAnimationFrame(renderBatch);
+  } catch (e) { console.warn('History load failed:', e); }
+}
+
+async function checkActiveStream() {
+  try {
+    const res = await fetch(apiUrl('/api/stream/active'));
+    if (res.status === 204 || !res.ok) return;
+    replayStream(await res.json());
+  } catch (e) {
+    console.warn('checkActiveStream failed:', e);
+  }
+}
+
+function replayStream(data) {
+  // If the stream already finished, its content is in history — skip replay to avoid duplicates
+  if (data.finished) return;
+
+  if (activeStreamPollTimer) {
+    clearTimeout(activeStreamPollTimer);
+    activeStreamPollTimer = null;
+  }
+
+  isStreaming = true;
+  currentStreamId = data.stream_id || null;
+  streamEl = null;
+  streamText = '';
+  toolCount = 0;
+  actionLogClear();
+  removeThinkingIndicator();
+  updateSendButton();
+
+  const events = Array.isArray(data.events) ? data.events : [];
+  for (const item of events) {
+    const eventData = item.data || {};
+    switch (item.event) {
+      case 'content_block_delta':
+        streamText += eventData.delta?.text || '';
+        break;
+      case 'thinking':
+      case 'reasoning':
+        setStatus('thinking');
+        break;
+      case 'tool_use':
+        toolCount++;
+        break;
+    }
+  }
+
+  if (data.finished) {
+    // 先渲染已累积的文字，再 finalize
+    const replayText = cleanContent(streamText);
+    if (replayText) streamEl = addMessage('being', replayText, false);
+    finalizeReplayStream();
+    return;
+  }
+
+  const visibleText = cleanContent(streamText);
+  if (visibleText) streamEl = addMessage('being', visibleText, true);
+
+  setStatus('thinking');
+  if (toolCount > 0) {
+    tuiSet('act');
+  } else if (visibleText) {
+    tuiSet('thinking');
+  } else {
+    showThinkingIndicator();
+    tuiSet('thinking');
+  }
+
+  const lastSeq = events.length
+    ? Number(events[events.length - 1].seq) || 0
+    : Math.max(0, (Number(data.next_seq) || 1) - 1);
+  pollActiveStream(data.stream_id, lastSeq);
+}
+
+function pollActiveStream(streamId, lastSeq) {
+  let interval = 500;
+  const MAX_INTERVAL = 5000;
+  let cursor = lastSeq;
+
+  const poll = async () => {
+    activeStreamPollTimer = null;
+    if (!isStreaming) return;
+
+    let events = [];
+    try {
+      const res = await fetch(apiUrl(`/api/stream/active?after=${cursor}`));
+      if (res.status === 204) {
+        finalizeReplayStream();
+        return;
+      }
+      if (!res.ok) {
+        interval = Math.min(interval * 1.5, MAX_INTERVAL);
+        if (isStreaming) {
+          activeStreamPollTimer = setTimeout(poll, interval);
+        }
+        return;
+      }
+
+      const data = await res.json();
+      if (data.stream_id !== streamId) {
+        finalizeReplayStream();
+        return;
+      }
+
+      events = Array.isArray(data.events) ? data.events : [];
+      for (const item of events) {
+        const seq = Number(item.seq);
+        if (Number.isFinite(seq) && seq <= cursor) continue;
+        processReplayEvent(item.event, item.data || {});
+        if (Number.isFinite(seq)) cursor = Math.max(cursor, seq);
+        if (!isStreaming) return;
+      }
+
+      if (data.finished) {
+        finalizeReplayStream();
+        return;
+      }
+    } catch (e) {
+      console.warn('pollActiveStream error:', e);
+    }
+
+    if (events.length > 0) {
+      interval = 500;  // got data, poll fast
+    } else {
+      interval = Math.min(interval * 1.5, MAX_INTERVAL);  // no data, slow down
+    }
+
+    if (isStreaming) {
+      activeStreamPollTimer = setTimeout(poll, interval);
+    }
+  };
+
+  activeStreamPollTimer = setTimeout(poll, interval);
+}
+
+function processReplayEvent(eventType, eventData) {
+  switch (eventType) {
+    case 'content_block_delta': {
+      const text = eventData.delta?.text || '';
+      if (!text) break;
+      removeThinkingIndicator();
+      tuiClear();
+      streamText += text;
+      const visibleText = cleanContent(streamText);
+      if (!streamEl) {
+        if (visibleText) streamEl = addMessage('being', visibleText, true);
+      } else if (visibleText) {
+        streamEl.innerHTML = renderMarkdown(visibleText);
+        scrollToBottom();
+      } else {
+        streamEl.parentElement.remove();
+        streamEl = null;
+      }
+      break;
+    }
+    case 'thinking':
+    case 'reasoning': {
+      setStatus('thinking');
+      const delta = (eventData && (eventData.text || eventData.delta?.text || eventData.delta)) || '';
+      const last = actionLog[actionLog.length - 1];
+      let entry;
+      if (last && last.type === 'think' && !last.done) {
+        entry = last;
+      } else {
+        entry = { type: 'think', preview: '', text: '' };
+        actionLogPush(entry);
+      }
+      if (delta && typeof delta === 'string') {
+        entry.text = (entry.text || '') + delta;
+        entry.preview = truncate(entry.text.trim(), 100);
+        scheduleRenderActivityLog();
+      }
+      tuiSet('thinking', null, { preview: truncate(entry.preview || '', 60) });
+      break;
+    }
+    case 'tool_use': {
+      toolCount++;
+      const name = eventData.name || 'tool';
+      const parsedInput = parseToolInput(eventData.input);
+      const arg = extractKeyArg(parsedInput);
+      const label = tuiLabels[name] || '在行动';
+      const prev = actionLog[actionLog.length - 1];
+      if (prev && prev.type === 'think' && !prev.done) {
+        prev.done = true;
+        prev.duration = Math.max(1, Math.round((Date.now() - prev.ts) / 1000));
+      }
+      actionLogPush({ type: 'tool', name, label, arg });
+      tuiSet(name, null, { arg, preview: '' });
+      break;
+    }
+    case 'tool_result': {
+      const isError = !!eventData.is_error;
+      for (let i = actionLog.length - 1; i >= 0; i--) {
+        const a = actionLog[i];
+        if (a.type === 'tool' && !a.done) {
+          a.done = true;
+          a.error = isError;
+          a.result = summarizeToolResult(eventData);
+          break;
+        }
+      }
+      scheduleRenderActivityLog();
+      tuiSet('thinking', null, { preview: '' });
+      break;
+    }
+    case 'message_stop':
+      finalizeReplayStream();
+      break;
+    case 'error':
+      if (activeStreamPollTimer) clearTimeout(activeStreamPollTimer);
+      activeStreamPollTimer = null;
+      isStreaming = false;
+      currentStreamId = null;
+      removeThinkingIndicator();
+      addMessage('system', '⚠ ' + (eventData.message || 'unknown error'));
+      setStatus('error');
+      tuiClear();
+      actionLogClear();
+      updateSendButton();
+      loadHistory();
+      scheduleFlushQueue();
+      break;
+  }
+}
+
+function finalizeReplayStream() {
+  if (activeStreamPollTimer) clearTimeout(activeStreamPollTimer);
+  activeStreamPollTimer = null;
+
+  // 先把 streamText 固化为正式消息（如果还没渲染）
+  if (streamText && streamEl) {
+    const finalText = cleanContent(streamText);
+    if (finalText) {
+      streamEl.innerHTML = renderMarkdown(finalText);
+      streamEl.closest('.message')?.classList.remove('streaming');
+    }
+  }
+
+  isStreaming = false;
+  currentStreamId = null;
+  streamEl = null;
+  streamText = '';
+  setStatus('connected');
+  tuiDone();
+  removeThinkingIndicator();
+  lastSendFailed = false;
+  updateSendButton();
+  // 不调 loadHistory — replay 已渲染完整内容，loadHistory 会擦掉它
+  // 下次用户发消息时自然触发新的 stream 流程
+  scheduleFlushQueue();
+}
+
+function updateViewportHeight() {
+  const vv = window.visualViewport;
+  if (vv) {
+    document.documentElement.style.setProperty('--app-height', vv.height + 'px');
+    document.documentElement.style.setProperty('--app-offset', vv.offsetTop + 'px');
+  } else {
+    document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+    document.documentElement.style.setProperty('--app-offset', '0px');
+  }
+  scrollToBottom();
+}
+
+function updatePlaceholder() {
+  $input.placeholder = `message ${beingName}...`;
+}
+
+// ---- Init ----
+document.addEventListener('DOMContentLoaded', async () => {
+  initMarkdown();
+  const params = new URL(location.href).searchParams;
+  beingName = params.get('name') || 'being';
+  $name.textContent = beingName;
+  document.title = 'Loom · ' + beingName;
+  updatePlaceholder();
+  updateViewportHeight();
+  window.addEventListener('resize', updateViewportHeight);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', updateViewportHeight);
+    window.visualViewport.addEventListener('scroll', updateViewportHeight);
+  }
+  
+  fetch(apiUrl('/api/status'))
+    .then(r => r.json())
+    .then(data => {
+      const name = data.being_name || data.name;
+      if (name) {
+        beingName = name;
+        $name.textContent = beingName;
+        document.title = 'Loom · ' + beingName;
+        updatePlaceholder();
+      }
+      updateSoulCard({
+        ...data,
+        name: beingName,
+        role: data.role || 'BEING',
+        quote: data.description || data.tagline || data.quote || '',
+        born: data.created || data.born || '—',
+        status: data.status || 'connected'
+      });
+    })
+    .catch(() => {});
+  
+  await loadHistory();
+  connected = true; // 防止 checkHealth 的首次 reconnect 再调 loadHistory
+  setStatus('connected'); // 状态点初始化为绿色
+  await checkActiveStream();
+  checkHealth();
+  let healthInterval = setInterval(checkHealth, 15000);
+  $input.focus();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkHealth();
+      if (!healthInterval) healthInterval = setInterval(checkHealth, 15000);
+      if (!isStreaming && !activeStreamPollTimer) loadHistory();
+    } else {
+      if (healthInterval) { clearInterval(healthInterval); healthInterval = null; }
+    }
+  });
+});
+</script>
+</body>
+</html>
+<!-- hardened: 2026-08-06 -->

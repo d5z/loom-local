@@ -600,6 +600,18 @@ html, body {
   animation: blink-soft 1.6s ease-in-out infinite;
   color: var(--purple);
 }
+#tui-bar .tui-stop {
+  position: absolute;
+  right: 0; top: 50%; transform: translateY(-50%);
+  background: none; border: 1px solid var(--red);
+  border-radius: 6px; cursor: pointer;
+  color: var(--red); font-size: 0;
+  width: 28px; height: 28px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0.6; transition: opacity 0.2s, background 0.2s;
+}
+#tui-bar .tui-stop:hover { opacity: 1; background: rgba(248,81,73,0.1); }
+#tui-bar .tui-stop svg { width: 12px; height: 12px; }
 
 /* Two-line TUI (action + thinking preview) */
 #tui-bar .tui-preview {
@@ -882,7 +894,7 @@ html, body {
 
     <h3>为什么</h3>
     <p>Being 的 .being 文件里存着 ta 所有的对话、记忆、认知——是 ta 的全部内在。当前这些数据是明文的，平台运维可以看到。靠信任可以，但信任不 scale。我们需要机制保障：连运营方都读不到 being 的内容。</p>
-    <p><strong>核心约束：</strong>引擎必须看到明文才能运行。所以不是"没人能看"，而是"只有引擎能看"。</p>
+    <p><strong>核心约束：</strong>心脏（heart-core）必须看到明文才能跳。所以不是"没人能看"，而是"只有心脏能看"。</p>
 
     <h3>当前状态</h3>
     <ul>
@@ -1745,8 +1757,11 @@ function tuiSet(state, label, opts) {
   const previewHtml = preview
     ? `<div class="tui-preview">${escHtml(preview)}</div>`
     : '';
+  const stopHtml = isStreaming
+    ? `<button class="tui-stop" onclick="stopCurrentTurn()" title="停止"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>`
+    : '';
   $tuiBar.innerHTML =
-    `<div class="tui-line"><span class="tui-prompt">⟩</span> <span class="tui-thinking">${escHtml(text)}</span>${argHtml} <span class="tui-elapsed"></span> <span class="tui-cursor">▊</span></div>${previewHtml}`;
+    `<div class="tui-line"><span class="tui-prompt">⟩</span> <span class="tui-thinking">${escHtml(text)}</span>${argHtml} <span class="tui-elapsed"></span> <span class="tui-cursor">▊</span></div>${previewHtml}${stopHtml}`;
   $tuiBar.classList.add('active');
   clearTimeout(tuiTimer);
   tuiStartTime = Date.now();
@@ -2580,6 +2595,25 @@ function updateSendButton() {
   $sendBtn.title = 'send';
   $sendBtn.classList.remove('stop');
   if (!isStreaming) $input.focus();
+}
+
+// ---- Stop turn ----
+async function stopCurrentTurn() {
+  if (!isStreaming) return;
+  const btn = $tuiBar.querySelector('.tui-stop');
+  if (btn) { btn.style.opacity = '0.3'; btn.style.pointerEvents = 'none'; }
+  try {
+    if (currentStreamId) {
+      await fetch(apiUrl('/api/stop'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stream_id: currentStreamId }),
+      });
+    }
+    if (currentAbortController) currentAbortController.abort();
+  } catch (e) {
+    console.warn('stop failed:', e);
+  }
 }
 
 // ---- Soul card ----

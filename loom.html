@@ -613,6 +613,18 @@ html, body {
 #tui-bar .tui-stop:hover { opacity: 1; background: rgba(248,81,73,0.1); }
 #tui-bar .tui-stop svg { width: 12px; height: 12px; }
 
+/* Stall hint (P1-7): 转圈的点不该承担全部沟通责任 */
+#tui-bar .tui-hint {
+  color: var(--yellow);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+  padding-left: 14px;
+}
+
 /* Two-line TUI (action + thinking preview) */
 #tui-bar .tui-preview {
   color: var(--text-ghost);
@@ -1104,6 +1116,7 @@ const $pendingFiles = $('#pending-files');
 const $tuiBar = $('#tui-bar');
 const $activityLog = $('#activity-log');
 const $sendBtn = $('#send-btn');
+const $reconnectBanner = $('#reconnect-banner');
 
 // Config
 // Derive API base from URL path (e.g. /alice/ → /alice, / → '')
@@ -1118,17 +1131,37 @@ function apiUrl(path) {
 let sessionId = null;
 let isStreaming = false, streamEl = null, streamText = '';
 let renderTimer = null;
-let beingName = 'being', connected = false;
+let beingName = 'being';
+
+// ---- Connection state machine (P1-4) ----
+// 替换原来的 `connected` 布尔 + 散落的 setStatus 调用。
+// 'connecting' | 'online' | 'degraded' | 'reconnecting' | 'offline'
+let connState = 'connecting';
+let streamStatus = 'connected';   // 由 setStatus 维护的"流状态"：connected / thinking / error
+let healthTimer = null;
+let healthBackoff = 0;
+let healthInFlight = false;
+let serverCommit = null;
+const HEALTH_BACKOFF_MS = [1000, 2000, 4000, 8000, 15000, 30000, 60000];
+const HEALTH_OK_INTERVAL_MS = 15000;
+const jitter = ms => Math.round(ms * (0.75 + Math.random() * 0.5));   // ±25%，防惊群
 let pendingFiles = [];
 let toolCount = 0, connectTime = null;
 let lastMessageTime = null;
 let currentAbortController = null;
 let currentStreamId = null;
+let lastStreamId = null;          // 断线恢复需要它——currentStreamId 会在收尾时被清掉
 let sendQueue = [];
 let thinkingEl = null;
 let activeStreamPollTimer = null;
 
-function escHtml(s) { 
+// ---- Live stream progress (P1-2) ----
+// liveSeq == 已消费的非-meta SSE 事件数 == 服务端 ActiveStream.seq（meta 不进缓冲）
+let liveSeq = 0;
+let streamWatchdogAborted = false;
+let userStoppedStream = false;
+
+function escHtml(s) {
   if (!s) return '';
   const d = document.createElement('div'); 
   d.textContent = s; 
@@ -1558,8 +1591,41 @@ async function disconnectOAuth() {
 }
 
 // ---- Status dot ----
+// setStatus 表达"流状态"，setConnState 表达"连接状态"。连接不健康时连接状态优先，
+// 这样流里的 setStatus('thinking') 不会把重连中的黄点冲掉。
+function effectiveDotClass() {
+  if (connState === 'offline') return 'error';
+  if (connState === 'reconnecting' || connState === 'degraded' || connState === 'connecting') {
+    return 'reconnecting';
+  }
+  return streamStatus || 'connected';
+}
+
 function setStatus(state) {
-  $dot.className = state;
+  streamStatus = state;
+  $dot.className = effectiveDotClass();
+  updateSendButton();
+}
+
+const CONN_BANNER = {
+  connecting: null,
+  online: null,
+  degraded: '连接不稳定，正在重试…',
+  reconnecting: '重连中…',
+  offline: '已离线，恢复网络后会自动继续',
+};
+
+function setConnState(next, detail) {
+  if (connState === next) return;
+  connState = next;
+  $dot.className = effectiveDotClass();
+  const banner = CONN_BANNER[next];
+  if (banner) {
+    $reconnectBanner.textContent = detail ? `${banner}（${detail}）` : banner;
+    $reconnectBanner.classList.add('active');
+  } else {
+    $reconnectBanner.classList.remove('active');
+  }
   updateSendButton();
 }
 
@@ -1765,6 +1831,7 @@ function tuiSet(state, label, opts) {
   $tuiBar.classList.add('active');
   clearTimeout(tuiTimer);
   tuiStartTime = Date.now();
+  tuiHintText = '';   // innerHTML 被重建了，hint 节点已经没了
   clearInterval(tuiElapsedTimer);
   tuiElapsedTimer = setInterval(() => {
     const elapsed = Math.floor((Date.now() - tuiStartTime) / 1000);
@@ -1772,7 +1839,44 @@ function tuiSet(state, label, opts) {
       const el = $tuiBar.querySelector('.tui-elapsed');
       if (el) el.textContent = `${elapsed}s`;
     }
+    // 按 lastProgressTime（真进展）而不是 tuiStartTime 判断是否该解释一句
+    if (isStreaming) updateStallHint(stalledForMs());
   }, 1000);
+}
+
+// ---- Stall hints (P1-7) -----------------------------------------------------
+// 分级提示：先什么都不说，超过预算 60% 才轻声解释，probe 判定 stalled 才明确告知在做什么。
+let tuiHintText = '';
+
+function setTuiHint(text) {
+  const t = text || '';
+  if (t === tuiHintText) return;
+  tuiHintText = t;
+  const existing = $tuiBar.querySelector('.tui-hint');
+  if (!t) { existing?.remove(); return; }
+  if (existing) { existing.textContent = t; return; }
+  if (!$tuiBar.classList.contains('active')) return;
+  const div = document.createElement('div');
+  div.className = 'tui-hint';
+  div.textContent = t;
+  $tuiBar.appendChild(div);
+}
+
+function clearTuiHint() { setTuiHint(''); }
+
+// 由 watchdog 和 tui 计时器共同驱动的"温和升级"提示
+function updateStallHint(stalledFor) {
+  if (!isStreaming) return;
+  const budget = stallBudgetMs();
+  if (stalledFor < budget * 0.6) { clearTuiHint(); return; }
+  const secs = Math.round(stalledFor / 1000);
+  if (livePhase === 'tool') {
+    setTuiHint(`${livePendingTool || '工具'} 执行中（${secs}s）…`);
+  } else if (livePhase === 'awaiting_first') {
+    setTuiHint(`还没收到第一个回应（${secs}s），正在检查连接…`);
+  } else {
+    setTuiHint(`还在等待回应（${secs}s），正在检查连接…`);
+  }
 }
 
 function updateTuiPreviewInline(preview) {
@@ -1794,6 +1898,7 @@ function tuiClear() {
   clearInterval(tuiElapsedTimer);
   tuiElapsedTimer = null;
   tuiStartTime = null;
+  tuiHintText = '';
   tuiCurrentState = null;
   tuiCurrentArg = '';
   tuiCurrentPreview = '';
@@ -2152,128 +2257,308 @@ function addTimeoutRetryMessage(text, files) {
   const div = document.createElement('div');
   div.className = 'message system';
   const ts = formatTime();
-  div.innerHTML = `<div class="meta">system · ${escHtml(ts)}</div><div class="content">等待回复超时了，可能是执行时间较长 <button type="button" class="retry-btn">重新发送</button></div>`;
-  div.querySelector('.retry-btn').addEventListener('click', () => {
+  div.innerHTML = `<div class="meta">system · ${escHtml(ts)}</div><div class="content">等了很久都没有新进展，可能是执行时间较长 <button type="button" class="retry-btn">检查一下</button></div>`;
+  // 按钮改成"再 probe 一次"而不是"重新发送"——服务端很可能还在跑，重发会起第二条 breath
+  div.querySelector('.retry-btn').addEventListener('click', async () => {
     div.remove();
-    checkActiveStream();
-  });
-  $msgs.appendChild(div);
-  scrollToBottom();
-  lastRole = 'system';
-}
-
-function addStreamDisconnectMessage(text, files) {
-  const div = document.createElement('div');
-  div.className = 'message system';
-  const ts = formatTime();
-  div.innerHTML = `<div class="meta">system · ${escHtml(ts)}</div><div class="content">连接中断了 <button type="button" class="retry-btn">重新发送</button></div>`;
-  div.querySelector('.retry-btn').addEventListener('click', () => {
-    div.remove();
-    loadHistory();
-    checkActiveStream();
-  });
-  $msgs.appendChild(div);
-  scrollToBottom();
-  lastRole = 'system';
-}
-
-async function send(text, filesOverride=null, sendOptions={}) {
-  if (isStreaming) {
-    // Sensory Splice: send to server even during streaming (202 splice)
-    const spliceMsg = (text || '').trim();
-    if (spliceMsg) {
-      addMessage('user', spliceMsg);
-      clearComposer();
-      try {
-        const res = await fetch(apiUrl('/api/chat/stream'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: spliceMsg, session_id: sessionId }),
-        });
-        if (res.status === 202) {
-          addMessage('system', '✅ 消息已送达，being 会在思考间隙看到');
-        }
-      } catch (e) {
-        console.warn('splice send failed:', e);
-        addMessage('system', '⚠️ 发送失败，稍后重试');
-      }
+    const sid = currentStreamId || lastStreamId;
+    if (sid) {
+      const p = await probeStream(sid, liveSeq);
+      const action = await applyProbeVerdict(p, sid, liveSeq);
+      if (action === 'cutover' || action === 'recovered') return;
     }
-    return;
+    await reconcileHistory();
+    await checkActiveStream();
+  });
+  $msgs.appendChild(div);
+  scrollToBottom();
+  lastRole = 'system';
+}
+
+// addStreamDisconnectMessage 已删除：断流不再弹"重新发送"按钮。
+// 服务端此刻 breath 还在跑、事件正往 replay 缓冲里写，前端手上有 stream_id 和
+// /api/stream/active?after= 这个断点续传接口——该自己拿回来，而不是让用户点。
+// 见 queueDisconnectRecovery / runPendingRecovery。
+
+// ---- Progress-based watchdog (P1-2) -----------------------------------------
+// 旧实现在**字节层**测量进展：reader.read() 一 resolve 就重置计时器。
+// 服务端每 15s 发一次 axum keepalive（`:\n\n`），字节流永远不空 → watchdog 永不触发。
+// 现在只认解析出来的 SSE 事件，keepalive 不再续命。
+const PROGRESS_EVENTS = new Set([
+  'content_block_delta', 'thinking', 'reasoning',
+  'tool_use', 'tool_result', 'message_stop', 'error',
+]);
+// 'usage' 故意不算进展——它可能在流末尾单独出现
+
+// 按相位分档的静默预算。宁可慢一点也不要误杀正常的慢工具。
+const STALL_MS = {
+  awaiting_first: 75000,   // POST 已 200，但一个 SSE 事件都没有（TTFT 上限 + 余量）
+  reasoning:      90000,   // reasoning delta 之间；部分 provider 只给汇总
+  text:           45000,   // 文本 delta 之间断 45s = 几乎必然异常
+  tool:          300000,   // run_command / browse_web 跑 5 分钟是合法的，不能杀
+};
+// probe 判定 stalled 后的重试退避，以及硬中止的累计预算
+const STALL_BACKOFF_MS = [30000, 60000, 120000];
+const STALL_GIVEUP_MS = 900000;   // 15 min
+
+let livePhase = 'awaiting_first';   // awaiting_first | text | tool | reasoning
+let livePendingTool = null;
+let lastProgressTime = Date.now();
+let hiddenAt = null;                // 页面转入后台的时刻，用于"暂停计时"而不是"续命"
+
+function resetLiveProgress() {
+  liveSeq = 0;
+  livePhase = 'awaiting_first';
+  livePendingTool = null;
+  lastProgressTime = Date.now();
+  hiddenAt = document.visibilityState === 'hidden' ? Date.now() : null;
+  clearTuiHint();
+}
+
+function markProgress(type, data) {
+  if (!PROGRESS_EVENTS.has(type)) return;
+  lastProgressTime = Date.now();
+  clearTuiHint();
+  if (type === 'tool_use') { livePhase = 'tool'; livePendingTool = (data && data.name) || 'tool'; }
+  else if (type === 'tool_result') { livePhase = 'text'; livePendingTool = null; }
+  else if (type === 'content_block_delta') livePhase = 'text';
+  else if (type === 'thinking' || type === 'reasoning') livePhase = 'reasoning';
+}
+
+function stallBudgetMs() { return STALL_MS[livePhase] || STALL_MS.awaiting_first; }
+function stalledForMs() {
+  // 后台期间不计时：hiddenAt 之后的时间不算"前台无进展时长"
+  const now = hiddenAt || Date.now();
+  return Math.max(0, now - lastProgressTime);
+}
+
+// 每条流一个：记录 stalled 起点、probe 退避、硬中止预算
+function makeStallTracker() {
+  return {
+    firstStalledAt: null,
+    nextProbeAt: 0,
+    backoffIdx: 0,
+    reset() { this.firstStalledAt = null; this.nextProbeAt = 0; this.backoffIdx = 0; },
+    dueForProbe() { return Date.now() >= this.nextProbeAt; },
+    onStalled() {
+      const now = Date.now();
+      if (!this.firstStalledAt) this.firstStalledAt = now;
+      const delay = STALL_BACKOFF_MS[Math.min(this.backoffIdx, STALL_BACKOFF_MS.length - 1)];
+      this.backoffIdx++;
+      this.nextProbeAt = now + delay;
+      return { totalMs: now - this.firstStalledAt, nextInMs: delay };
+    },
+  };
+}
+
+// AbortSignal.timeout 在老 Safari 上没有，做个降级
+function timeoutSignal(ms) {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(ms);
   }
-  const { isManualRetry = false } = sendOptions;
-  const msg = (text || '').trim();
-  const fromQueue = Array.isArray(filesOverride) && !isManualRetry;
-  const filesToSend = Array.isArray(filesOverride) ? filesOverride : [...pendingFiles];
-  if (!msg && !filesToSend.length) return;
-  
-  if (!isManualRetry) {
-    addMessage('user', msg || `[${filesToSend.length} file(s)]`);
-    if (!fromQueue) clearComposer();
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(), ms);
+  return ac.signal;
+}
+
+// 后台 tab：**暂停计时**而不是续命。回到前台时把挂起时长补给 lastProgressTime，
+// 等价于"只统计前台的无进展时长"，锁屏 5 分钟不会被误判为超时。
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    if (!hiddenAt) hiddenAt = Date.now();
+  } else if (hiddenAt) {
+    lastProgressTime += (Date.now() - hiddenAt);
+    hiddenAt = null;
   }
-  setStatus('thinking');
-  actionLogClear();
-  tuiSet('thinking');
-  showThinkingIndicator();
-  isStreaming = true;
-  updateSendButton();
-  
-  const body = { message: msg || `[Sent ${filesToSend.length} file(s)]` };
-  if (sessionId) body.session_id = sessionId;
-  if (filesToSend.length) {
-    body.attachments = filesToSend.map(f => ({ media_type: f.type || 'application/octet-stream', data: f.base64 }));
-  }
-  
+});
+
+// ---- Probe before abort (P1-3) ----------------------------------------------
+// 服务端把整条 breath 都缓冲在 /api/stream/active 里（环形缓冲 2000 条，seq 单调递增），
+// 且客户端断开**不会**中断 breath。所以 watchdog 到期时正确的动作不是 abort + 报错，
+// 而是先问一句服务端到底有没有进展，再决定换哪条路继续读。
+//
+// 返回 { verdict: 'progressing'|'finished'|'gone'|'superseded'|'stalled'|'unreachable', serverSeq? }
+async function probeStream(streamId, localSeq) {
   try {
-    const res = await fetchWithRetry(
-      apiUrl('/api/chat/stream'),
-      () => {
-        currentAbortController = new AbortController();
-        return {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: currentAbortController.signal
-        };
-      },
-      {
-        onRetry: async () => {
-          removeThinkingIndicator();
-          showFetchRetryStatus();
-        }
-      }
-    );
-    clearFetchRetryStatus();
-    setStatus('thinking');
+    const r = await fetch(apiUrl('/api/stream/active'), {
+      cache: 'no-store',
+      signal: timeoutSignal(8000),
+    });
+    if (r.status === 204) return { verdict: 'gone' };
+    if (!r.ok) return { verdict: 'unreachable' };
+    const d = await r.json();
+    if (streamId && d.stream_id !== streamId) return { verdict: 'superseded', data: d };
+    const serverSeq = Math.max(0, (Number(d.next_seq) || 1) - 1);
+    if (d.finished) return { verdict: 'finished', serverSeq, data: d };
+    if (serverSeq > localSeq) return { verdict: 'progressing', serverSeq, data: d };
+    return { verdict: 'stalled', serverSeq, data: d };
+  } catch (_) {
+    return { verdict: 'unreachable' };
+  }
+}
 
-    if (res.status === 202) {
-      removeThinkingIndicator();
-      tuiClear();
-      let spliced = false;
-      try {
-        const data = await res.json();
-        spliced = !!data && data.spliced === true;
-      } catch (_) {
-        spliced = true;
+// 无缝 cutover：**不能**走 replayStream()，它会把 streamText 清空重来。
+// processReplayEvent 是追加语义，会复用现有的 streamEl / streamText，
+// 从 after=localSeq 接上去文字严丝合缝，一个字不重不漏。
+function cutoverToReplay(streamId, fromSeq) {
+  if (activeStreamPollTimer) { clearTimeout(activeStreamPollTimer); activeStreamPollTimer = null; }
+  currentAbortController = null;
+  pendingRecovery = null;
+  isStreaming = true;
+  currentStreamId = streamId;
+  lastStreamId = streamId;
+  liveSeq = fromSeq;
+  lastProgressTime = Date.now();
+  if (streamEl) streamEl.classList.add('stream-cursor');
+  setStatus('thinking');
+  updateSendButton();
+  pollActiveStream(streamId, fromSeq);
+}
+
+// 流已经从服务端消失（10s 清理）或被别的 tab 覆盖 → 回落到 /api/history 拿落盘内容。
+// assistant moment 先落盘后发 Done，所以这条路一定能拿到完整回复。
+async function recoverViaHistory() {
+  if (activeStreamPollTimer) { clearTimeout(activeStreamPollTimer); activeStreamPollTimer = null; }
+  const partialEl = streamEl;
+  const partialText = streamText;
+  streamEl = null;
+  streamText = '';
+  isStreaming = false;
+  if (currentStreamId) lastStreamId = currentStreamId;
+  currentStreamId = null;
+  currentAbortController = null;
+  pendingRecovery = null;
+  removeThinkingIndicator();
+
+  const added = await reconcileHistory();
+  if (added > 0) {
+    // 历史里已有权威版本 → 扔掉屏幕上的半截内容，避免重复
+    partialEl?.closest('.message')?.remove();
+  } else if (partialEl) {
+    partialEl.classList.remove('stream-cursor');
+    const visible = cleanContent(partialText);
+    if (visible) partialEl.innerHTML = renderMarkdown(visible);
+    else partialEl.closest('.message')?.remove();
+  }
+
+  setStatus('connected');
+  tuiDone();
+  clearTuiHint();
+  lastSendFailed = false;
+  updateSendButton();
+  scheduleFlushQueue();
+  return added;
+}
+
+// 非 SSE 上下文（重连后、replay 轮询中）复用的决策表
+async function applyProbeVerdict(p, streamId, localSeq) {
+  switch (p.verdict) {
+    case 'progressing':
+    case 'finished':
+      cutoverToReplay(streamId, localSeq);
+      return 'cutover';
+    case 'gone':
+    case 'superseded':
+      await recoverViaHistory();
+      return 'recovered';
+    case 'stalled':
+      setTuiHint('服务端还没有新进展，正在继续等待…');
+      return 'stalled';
+    case 'unreachable':
+    default:
+      setConnState(navigator.onLine === false ? 'offline' : 'reconnecting');
+      return 'unreachable';
+  }
+}
+
+// 断线时记下恢复意图，由连接状态机在重连后兑现（P1-E：不再弹按钮让用户点）
+let pendingRecovery = null;
+
+function queueDisconnectRecovery(streamId, localSeq) {
+  pendingRecovery = { streamId, localSeq };
+  setConnState(navigator.onLine === false ? 'offline' : 'reconnecting');
+  setTuiHint('连接中断了，正在自动恢复…');
+  runPendingRecovery().catch(err => console.warn('recovery probe failed:', err));
+}
+
+async function runPendingRecovery() {
+  const r = pendingRecovery;
+  if (!r) return 'idle';
+  const p = await probeStream(r.streamId, r.localSeq);
+  if (p.verdict === 'unreachable') {
+    setConnState(navigator.onLine === false ? 'offline' : 'reconnecting');
+    return 'unreachable';   // 保留 pendingRecovery，等 checkHealth 恢复后再试
+  }
+  pendingRecovery = null;
+  const action = await applyProbeVerdict(p, r.streamId, r.localSeq);
+  if (action === 'stalled') pendingRecovery = r;   // 还没好，下次重连再问
+  return action;
+}
+
+// ---- SSE stream consumption -------------------------------------------------
+// 从 send() 里抽出来的读取循环。可被 send() 和 splice 分支（脏 isStreaming 收到 200）复用，
+// 也是 watchdog probe 热切换到 replay 通道的落点。
+// 返回 { outcome: 'done' | 'switch_to_replay' | 'aborted' | 'server_error', streamId, localSeq }
+// 异常（AbortError / TypeError / 其它）向上抛给调用方统一处理。
+async function consumeChatStream(res, msg, filesToSend) {
+  let streamTimeoutId = null;
+  let watchdogAborted = false;
+  streamWatchdogAborted = false;
+  userStoppedStream = false;
+  let sawServerError = false;
+  let cutoverRequest = null;        // probe 判定 progressing/finished → 热切换到 replay
+  let historyRecoveryRequested = false;   // probe 判定 gone/superseded → 回落历史对账
+
+  const killWatchdog = () => {
+    if (streamTimeoutId) { clearInterval(streamTimeoutId); streamTimeoutId = null; }
+  };
+  const abortReader = () => {
+    killWatchdog();
+    try { currentAbortController?.abort(); } catch (_) {}
+  };
+  const hardTimeout = () => {
+    watchdogAborted = true;
+    streamWatchdogAborted = true;
+    abortReader();
+  };
+
+  // watchdog 到期 → **不直接 abort**，先 probe 服务端有没有进展。
+  // 决策表见 probeStream 上方注释。
+  async function onWatchdogExpired(tracker) {
+    const sid = currentStreamId || lastStreamId;
+    if (!sid) { hardTimeout(); return; }   // 连 meta 都没到，没法 probe
+
+    const p = await probeStream(sid, liveSeq);
+    if (cutoverRequest || historyRecoveryRequested) return;   // 已经在切换了
+
+    switch (p.verdict) {
+      case 'progressing':
+      case 'finished':
+        cutoverRequest = { streamId: sid, localSeq: liveSeq };
+        abortReader();
+        return;
+      case 'gone':
+      case 'superseded':
+        historyRecoveryRequested = true;
+        abortReader();
+        return;
+      case 'stalled': {
+        const { totalMs, nextInMs } = tracker.onStalled();
+        if (totalMs >= STALL_GIVEUP_MS) { hardTimeout(); return; }
+        setTuiHint(`服务端也没有新进展，${Math.round(nextInMs / 1000)} 秒后再检查一次`);
+        return;
       }
-      if (spliced) {
-        addMessage('system', '消息已送达，being 正在思考中');
-        setStatus('thinking');
-      } else {
-        addMessage('system', '消息已送达');
-        setStatus('connected');
+      case 'unreachable':
+      default: {
+        const { totalMs } = tracker.onStalled();
+        setConnState(navigator.onLine === false ? 'offline' : 'reconnecting');
+        if (totalMs >= STALL_GIVEUP_MS) hardTimeout();
+        return;
       }
-      return;
     }
-    
-    if (!res.ok) {
-      const err = await res.text();
-      addMessage('system', '⚠ ' + err);
-      setStatus('error');
-      removeThinkingIndicator();
-      tuiClear();
-      return;
-    }
-    
+  }
+
+  try {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -2281,41 +2566,32 @@ async function send(text, filesOverride=null, sendOptions={}) {
     streamText = '';
     toolCount = 0;
     let eventType = '';
-    let lastDataTime = Date.now();
-    
-    // Streaming timeout — abort if no SSE events for 5 minutes (base) or 10 minutes (with tool activity)
-    // During heavy tool execution, tool_use/tool_result events keep resetting this.
-    const STREAM_TIMEOUT_BASE_MS = 300000;   // 5 min — 无任何数据
-    const STREAM_TIMEOUT_ACTIVE_MS = 600000; // 10 min — tool 执行中
-    let streamHasToolActivity = false;
-    let streamTimeoutId = null;
+    resetLiveProgress();
+
+    const stall = makeStallTracker();
+    let watchdogBusy = false;
+
     streamTimeoutId = setInterval(() => {
-      // 页面在后台时不触发 timeout
-      if (document.visibilityState === 'hidden') {
-        lastDataTime = Date.now(); // 暂停超时计时
-        return;
-      }
-      const timeout = streamHasToolActivity ? STREAM_TIMEOUT_ACTIVE_MS : STREAM_TIMEOUT_BASE_MS;
-      if (Date.now() - lastDataTime > timeout) {
-        clearInterval(streamTimeoutId);
-        streamTimeoutId = null;
-        if (currentStreamId) {
-          fetch(apiUrl('/api/stop'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ stream_id: currentStreamId })
-          }).catch(() => {});
-        }
-        if (currentAbortController) currentAbortController.abort();
-        // 不在这里 addMessage——交给 catch 分支处理 AbortError
-      }
+      // 后台时只是不判断（计时已经在 stalledForMs 里冻住了），绝不重置计时器
+      if (document.visibilityState === 'hidden') return;
+      if (watchdogBusy || userStoppedStream) return;
+      const stalledFor = stalledForMs();
+      updateStallHint(stalledFor);
+      if (stalledFor < stallBudgetMs()) return;
+      if (!stall.dueForProbe()) return;
+      watchdogBusy = true;
+      onWatchdogExpired(stall)
+        .catch(err => console.warn('watchdog probe failed:', err))
+        .finally(() => { watchdogBusy = false; });
     }, 5000);
     
     while (true) {
       const { done, value } = await reader.read();
-      if (done) { clearInterval(streamTimeoutId); break; }
-      lastDataTime = Date.now();
-      
+      if (done) { clearInterval(streamTimeoutId); streamTimeoutId = null; break; }
+      // ⚠️ 这里**故意不更新任何计时器**：reader.read() 是字节层的，
+      // 服务端 15s 一次的 keepalive（`:\n\n`）也会让它 resolve。
+      // 进展只由下面解析出来的真 SSE 事件（markProgress）来标记。
+
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop();
@@ -2328,9 +2604,21 @@ async function send(text, filesOverride=null, sendOptions={}) {
         if (!line.startsWith('data: ')) continue;
         try {
           const data = JSON.parse(line.slice(6));
-          
+
+          // meta 不写服务端 replay 缓冲（http.rs:1950 直接 tx.send），
+          // 其余每个事件恰好占一个 seq → "收到的非 meta 事件数" == "消费到的服务端 seq"。
+          // 这个 1:1 性质是 probeStream 判定 progressing 的基石。
+          if (eventType && eventType !== 'meta') {
+            liveSeq++;
+            markProgress(eventType, data);
+          }
+
           if (eventType === 'meta') {
-            if (data.stream_id) currentStreamId = data.stream_id;
+            if (data.stream_id) {
+              currentStreamId = data.stream_id;
+              lastStreamId = data.stream_id;
+              syncHistoryCursor();   // 用户 moment 此时已落盘，推进游标避免对账时重复渲染
+            }
           }
 
           if (eventType === 'content_block_delta') {
@@ -2343,12 +2631,9 @@ async function send(text, filesOverride=null, sendOptions={}) {
             if (!streamEl) {
               streamEl = addMessage('being', streamText, true);
             }
-            // Don't update DOM on every delta — let throttle handle it
-            // (setting textContent between throttled renders causes flash)
-
-            // Throttled markdown render — at most once per 150ms
+            // Smooth streaming: rAF for visual updates, markdown re-parse throttled
             if (!renderTimer) {
-              renderTimer = setTimeout(() => {
+              renderTimer = requestAnimationFrame(() => {
                 renderTimer = null;
                 if (streamEl && streamText) {
                   const visible = cleanContent(streamText);
@@ -2357,7 +2642,7 @@ async function send(text, filesOverride=null, sendOptions={}) {
                     scrollToBottom();
                   }
                 }
-              }, 150);
+              });
             }
           }
           
@@ -2379,13 +2664,11 @@ async function send(text, filesOverride=null, sendOptions={}) {
               scheduleRenderActivityLog();
             }
             tuiSet('thinking', null, { preview: truncate(entry.preview || '', 60) });
-            lastDataTime = Date.now();
           }
           
           if (eventType === 'tool_use') {
             removeThinkingIndicator();
             toolCount++;
-            streamHasToolActivity = true;
             const name = data.name || 'tool';
             const parsedInput = parseToolInput(data.input);
             const arg = extractKeyArg(parsedInput);
@@ -2399,7 +2682,6 @@ async function send(text, filesOverride=null, sendOptions={}) {
             actionLogPush({ type: 'tool', name, label, arg });
             tuiSet(name, null, { arg, preview: '' });
             setStatus('thinking');
-            lastDataTime = Date.now();
           }
           
           if (eventType === 'tool_result') {
@@ -2424,12 +2706,11 @@ async function send(text, filesOverride=null, sendOptions={}) {
             } else {
               tuiSet('thinking', null, { preview: '' });
             }
-            lastDataTime = Date.now();
           }
           
           if (eventType === 'message_stop') {
             // Clear throttle timer and do final render
-            if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+            if (renderTimer) { cancelAnimationFrame(renderTimer); renderTimer = null; }
             removeThinkingIndicator();
             if (streamEl) {
               streamEl.classList.remove('stream-cursor');
@@ -2444,10 +2725,13 @@ async function send(text, filesOverride=null, sendOptions={}) {
             isStreaming = false;
             setStatus('connected');
             tuiDone();
+            clearTuiHint();
             lastSendFailed = false;
+            syncHistoryCursor();   // 推进游标，避免之后的增量对账重画这条回复
           }
           
           if (eventType === 'error') {
+            sawServerError = true;
             removeThinkingIndicator();
             addMessage('system', '⚠ ' + (data.message || 'unknown error'));
             isStreaming = false;
@@ -2470,7 +2754,7 @@ async function send(text, filesOverride=null, sendOptions={}) {
     }
     
     if (streamText) {
-      if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+      if (renderTimer) { cancelAnimationFrame(renderTimer); renderTimer = null; }
       removeThinkingIndicator();
       const visibleText = cleanContent(streamText);
       if (streamEl && visibleText) {
@@ -2485,105 +2769,395 @@ async function send(text, filesOverride=null, sendOptions={}) {
       setStatus('connected');
       tuiDone();
     }
-    
+
+    return {
+      outcome: sawServerError ? 'server_error' : 'done',
+      streamId: currentStreamId || lastStreamId,
+      localSeq: liveSeq,
+    };
   } catch (e) {
-    clearFetchRetryStatus();
-    removeThinkingIndicator();
-    if (e.name === 'AbortError') {
-      // 区分 timeout abort 和用户手动 stop
-      const wasTimeout = streamTimeoutId === null; // timeout 触发时已 clear 自身
-      if (streamEl) {
-        streamEl.classList.remove('stream-cursor');
-        const visibleText = cleanContent(streamText);
-        if (visibleText) streamEl.innerHTML = renderMarkdown(visibleText);
-        else { streamEl.parentElement.remove(); streamEl = null; }
-      }
-      if (wasTimeout) {
-        addTimeoutRetryMessage(msg, filesToSend);
-        setStatus('error');
-        lastSendFailed = true;
-      }
-      tuiClear();
-    } else if (e instanceof TypeError) {
-      if (streamText) {
-        // stream 已经建立并收到部分内容后断开
-        if (streamEl) {
-          streamEl.classList.remove('stream-cursor');
-          const visibleText = cleanContent(streamText);
-          if (visibleText) streamEl.innerHTML = renderMarkdown(visibleText);
-          else { streamEl.parentElement.remove(); streamEl = null; }
-        }
-        addStreamDisconnectMessage(msg, filesToSend);
-      } else {
-        // 初始连接就失败
-        addNetworkFailureMessage(msg, filesToSend);
-      }
-      setStatus('error');
-      lastSendFailed = true;
-    } else {
-      addMessage('system', '⚠ ' + e.message);
-      setStatus('error');
-      lastSendFailed = true;
+    // watchdog 主动 abort 的两条自愈路径：调用方不该把它们当成错误
+    if (e.name === 'AbortError' && cutoverRequest) {
+      return {
+        outcome: 'switch_to_replay',
+        streamId: cutoverRequest.streamId,
+        localSeq: cutoverRequest.localSeq,
+      };
     }
-    isStreaming = false;
-    tuiClear();
+    if (e.name === 'AbortError' && historyRecoveryRequested) {
+      await recoverViaHistory();
+      return {
+        outcome: 'done',
+        handled: true,
+        streamId: currentStreamId || lastStreamId,
+        localSeq: liveSeq,
+      };
+    }
+    throw e;
   } finally {
-    // 1. 清理定时器（最高优先级）
-    if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
-    if (streamTimeoutId) { clearInterval(streamTimeoutId); streamTimeoutId = null; }
-    // 2. 清理 abort controller
-    currentAbortController = null;
-    currentStreamId = null;
-    // 3. 重置状态
-    isStreaming = false;
-    // 4. 更新 UI
-    updateSendButton();
-    // 5. 发送队列（最后执行，可能再次进入 send）
-    scheduleFlushQueue();
+    killWatchdog();
+    streamWatchdogAborted = watchdogAborted;
   }
 }
 
-// ---- Health & Reconnect ----
-let reconnectInterval = null;
-const $reconnectBanner = document.getElementById('reconnect-banner');
 
-async function checkHealth() {
+// 统一的 send/stream 收尾。任何提前 return 的分支都必须走它，
+// 否则 isStreaming / 发送按钮 / 发送队列会卡住。
+function finalizeSendCleanup() {
+  if (renderTimer) { cancelAnimationFrame(renderTimer); renderTimer = null; }
+  currentAbortController = null;
+  if (currentStreamId) lastStreamId = currentStreamId;
+  currentStreamId = null;
+  isStreaming = false;
+  updateSendButton();
+  // 恢复流程在途时先不放队列——否则可能在 cutover 之前又起一条新 breath
+  if (pendingRecovery) return;
+  scheduleFlushQueue();
+}
+
+// splice 分支：isStreaming 为 true 时发消息。
+// 服务端只有真的在 breath 中才回 202；如果本地 isStreaming 是脏的，
+// 服务端会起一条新 breath 并回 200 + 真 SSE 流。那种情况下**绝不能**把 body 扔着不管
+// ——浏览器 fetch 内部队列填满后会施加 TCP 背压，把服务端的 SSE 转发任务
+// 阻塞在 tx.send().await 上，连 /api/stream/active 的 replay 缓冲都会停止推进。
+async function spliceSend(text) {
+  const spliceMsg = (text || '').trim();
+  if (!spliceMsg) return;
+  addMessage('user', spliceMsg);
+  noteLocalEcho('user', spliceMsg);
+  clearComposer();
+  let res;
   try {
-    const r = await fetch(apiUrl('/health'), { method: 'GET' });
-    if (r.ok && !connected) {
-      connected = true;
+    res = await fetch(apiUrl('/api/chat/stream'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: spliceMsg, session_id: sessionId }),
+    });
+  } catch (e) {
+    console.warn('splice send failed:', e);
+    addMessage('system', '⚠️ 发送失败，稍后重试');
+    return;
+  }
+  if (res.status === 202) {
+    addMessage('system', '✅ 消息已送达，being 会在思考间隙看到');
+    return;
+  }
+  if (res.ok && res.body) {
+    console.warn('splice 收到 200，本地 isStreaming 状态已脏，转入流读取');
+    isStreaming = false;
+    setStatus('thinking');
+    actionLogClear();
+    tuiSet('thinking');
+    showThinkingIndicator();
+    isStreaming = true;
+    updateSendButton();
+    await driveChatStream(res, spliceMsg, []);
+    return;
+  }
+  // 非 200/202：主动排空 body，别让连接挂着
+  res.body?.cancel().catch(() => {});
+  addMessage('system', '⚠️ 发送失败，稍后重试');
+}
+
+async function send(text, filesOverride=null, sendOptions={}) {
+  if (isStreaming) {
+    await spliceSend(text);
+    return;
+  }
+  const { isManualRetry = false } = sendOptions;
+  const msg = (text || '').trim();
+  const fromQueue = Array.isArray(filesOverride) && !isManualRetry;
+  const filesToSend = Array.isArray(filesOverride) ? filesOverride : [...pendingFiles];
+  if (!msg && !filesToSend.length) return;
+
+  if (!isManualRetry) {
+    addMessage('user', msg || `[${filesToSend.length} file(s)]`);
+    noteLocalEcho('user', msg || `[${filesToSend.length} file(s)]`);
+    if (!fromQueue) clearComposer();
+  }
+  setStatus('thinking');
+  actionLogClear();
+  tuiSet('thinking');
+  showThinkingIndicator();
+  isStreaming = true;
+  updateSendButton();
+
+  const body = { message: msg || `[Sent ${filesToSend.length} file(s)]` };
+  if (sessionId) body.session_id = sessionId;
+  if (filesToSend.length) {
+    body.attachments = filesToSend.map(f => ({ media_type: f.type || 'application/octet-stream', data: f.base64 }));
+  }
+
+  // POST 阶段：只负责把请求打出去。读取循环在 consumeChatStream 里。
+  let res;
+  try {
+    res = await fetchWithRetry(
+      apiUrl('/api/chat/stream'),
+      () => {
+        currentAbortController = new AbortController();
+        return {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: currentAbortController.signal
+        };
+      },
+      {
+        onRetry: async () => {
+          removeThinkingIndicator();
+          showFetchRetryStatus();
+        }
+      }
+    );
+  } catch (e) {
+    handleStreamError(e, msg, filesToSend);
+    finalizeSendCleanup();
+    return;
+  }
+
+  clearFetchRetryStatus();
+  setStatus('thinking');
+
+  if (res.status === 202) {
+    removeThinkingIndicator();
+    tuiClear();
+    let spliced = false;
+    try {
+      const data = await res.json();
+      spliced = !!data && data.spliced === true;
+    } catch (_) {
+      spliced = true;
+    }
+    if (spliced) {
+      addMessage('system', '消息已送达，being 正在思考中');
+      setStatus('thinking');
+    } else {
+      addMessage('system', '消息已送达');
       setStatus('connected');
-      connectTime = Date.now();
-      hideReconnectBanner();
-      if (!isStreaming && !activeStreamPollTimer) loadHistory();
     }
-    if (!r.ok && connected) {
-      connected = false;
-      setStatus('error');
-      showReconnectBanner();
+    finalizeSendCleanup();
+    return;
+  }
+
+  if (!res.ok) {
+    const err = await res.text();
+    addMessage('system', '⚠ ' + err);
+    setStatus('error');
+    removeThinkingIndicator();
+    tuiClear();
+    finalizeSendCleanup();
+    return;
+  }
+
+  await driveChatStream(res, msg, filesToSend);
+}
+
+// 读取循环 + 统一的异常处理 + 统一的收尾。
+// send() 和 spliceSend() 都走这里，保证 isStreaming / 队列 / 按钮在任何路径上都能复位。
+async function driveChatStream(res, msg, filesToSend) {
+  let handedOff = false;
+  try {
+    const result = await consumeChatStream(res, msg, filesToSend);
+    if (result.outcome === 'switch_to_replay') {
+      // watchdog probe 判定服务端仍在推进：SSE 管道死了但 breath 活着。
+      // 保留 streamEl / streamText，从 localSeq 处热切换到 replay 通道。
+      handedOff = true;
+      cutoverToReplay(result.streamId, result.localSeq);
+    } else if (result.handled) {
+      handedOff = true;   // gone / superseded：recoverViaHistory 已经做完收尾
     }
-  } catch {
-    if (connected) {
-      connected = false;
+    return result;
+  } catch (e) {
+    handleStreamError(e, msg, filesToSend);
+    return { outcome: 'aborted', streamId: lastStreamId, localSeq: liveSeq };
+  } finally {
+    if (renderTimer) { cancelAnimationFrame(renderTimer); renderTimer = null; }
+    if (!handedOff) finalizeSendCleanup();
+  }
+}
+
+// 把当前 streamEl 上的流式内容固化下来（去掉光标、做最终 markdown 渲染）。
+function finalizePartialBubble() {
+  if (!streamEl) return;
+  streamEl.classList.remove('stream-cursor');
+  const visibleText = cleanContent(streamText);
+  if (visibleText) streamEl.innerHTML = renderMarkdown(visibleText);
+  else { streamEl.parentElement?.remove(); streamEl = null; }
+}
+
+// 统一的流异常处理。注意它**总是**让调用方走 finalizeSendCleanup()：
+// 断线恢复路径靠 pendingRecovery 让 finalizeSendCleanup 跳过队列 flush，
+// 而不是靠"不收尾"——isStreaming 卡在 true 是这次修复要根除的东西。
+function handleStreamError(e, msg, filesToSend) {
+  clearFetchRetryStatus();
+  removeThinkingIndicator();
+  if (e.name === 'AbortError') {
+    const wasTimeout = streamWatchdogAborted;
+    finalizePartialBubble();
+    if (wasTimeout) {
+      addTimeoutRetryMessage(msg, filesToSend);
       setStatus('error');
-      showReconnectBanner();
+      lastSendFailed = true;
+    } else if (userStoppedStream) {
+      // 用户手动停止：内容已在屏幕上，只需推进历史游标避免下次对账重复渲染
+      syncHistoryCursor();
+      setStatus('connected');
+    }
+    tuiClear();
+  } else if (e instanceof TypeError) {
+    const sid = currentStreamId || lastStreamId;
+    if (sid) {
+      // 服务端此刻 breath 还在跑，事件正往 replay 缓冲里写。
+      // 不弹"重新发送"按钮——记下恢复意图，交给连接状态机在重连后 probe。
+      finalizePartialBubble();
+      queueDisconnectRecovery(sid, liveSeq);
+      tuiClear();
+    } else {
+      // 初始连接就失败，消息根本没送出去 → 保留手动重试按钮
+      addNetworkFailureMessage(msg, filesToSend);
+      setStatus('error');
+      lastSendFailed = true;
+      tuiClear();
+    }
+  } else {
+    addMessage('system', '⚠ ' + e.message);
+    setStatus('error');
+    lastSendFailed = true;
+    tuiClear();
+  }
+  isStreaming = false;
+}
+
+// ---- Health & Reconnect (P1-4) ----------------------------------------------
+// 旧实现是"边沿触发器"：只在 connected 状态跳变时做事，/health 一直 200 就什么都不干；
+// 没有超时、没有 in-flight 守卫、setInterval 会堆叠并发请求，还把 /health 的响应体扔了。
+// 现在：自调度 + 指数退避 + jitter + AbortSignal 超时 + 用 commit hash 探测服务端重启。
+let healthForcePending = false;
+
+async function checkHealth({ force = false } = {}) {
+  // in-flight 守卫：force 的语义是"不等退避立刻探一次"，不是"允许并发请求"。
+  // （旧实现用 setInterval 不 await，弱网下请求会叠加。）
+  if (healthInFlight) {
+    if (force) healthForcePending = true;
+    return;
+  }
+  healthInFlight = true;
+  clearTimeout(healthTimer);
+  try {
+    const r = await fetch(apiUrl('/health'), {
+      method: 'GET',
+      cache: 'no-store',
+      signal: timeoutSignal(6000),
+    });
+    if (!r.ok) throw new Error('health ' + r.status);
+
+    // /health 返回 "OK <commit_hash>"（http.rs:793-797）——免费的进程重启探测信号
+    let commit = '';
+    try { commit = (await r.text()).trim().split(/\s+/)[1] || ''; } catch (_) {}
+    const restarted = !!(serverCommit && commit && commit !== serverCommit);
+    if (commit) serverCommit = commit;
+
+    const wasDown = connState !== 'online';
+    healthBackoff = 0;
+    if (!connectTime) connectTime = Date.now();
+    setConnState('online');
+    if (wasDown || restarted) {
+      // 恢复动作自己出错不代表连接不健康——别让它把状态又打回 reconnecting
+      try { await onReconnected({ restarted }); }
+      catch (err) { console.warn('onReconnected failed:', err); }
+    }
+  } catch (_) {
+    setConnState(
+      navigator.onLine === false ? 'offline'
+      : connState === 'online' ? 'degraded'
+      : 'reconnecting'
+    );
+    healthBackoff = Math.min(healthBackoff + 1, HEALTH_BACKOFF_MS.length - 1);
+  } finally {
+    healthInFlight = false;
+    if (healthForcePending) {
+      healthForcePending = false;
+      setTimeout(() => checkHealth({ force: true }), 0);
+    } else {
+      scheduleHealth();
     }
   }
 }
 
-function showReconnectBanner() {
-  $reconnectBanner.classList.add('active');
-  if (!reconnectInterval) {
-    reconnectInterval = setInterval(checkHealth, 5000);
-  }
+function scheduleHealth() {
+  clearTimeout(healthTimer);
+  // 后台且健康 → 停轮询（回前台的钩子会立刻 force 一次）
+  if (document.visibilityState === 'hidden' && connState === 'online' && !isStreaming) return;
+  const base = connState === 'online' ? HEALTH_OK_INTERVAL_MS : HEALTH_BACKOFF_MS[healthBackoff];
+  healthTimer = setTimeout(() => checkHealth(), jitter(base));
 }
 
-function hideReconnectBanner() {
-  $reconnectBanner.classList.remove('active');
-  if (reconnectInterval) {
-    clearInterval(reconnectInterval);
-    reconnectInterval = null;
+// 重连之后的恢复——不再无脑 loadHistory() 清屏重渲染
+async function onReconnected({ restarted = false } = {}) {
+  if (restarted) {
+    // 进程重启 → 在途 stream 必死，本地状态全部作废
+    console.warn('server restarted (commit changed), abandoning in-flight stream');
+    abandonLiveStream();
+    await reconcileHistory({ full: true });
+    scheduleFlushQueue();
+    return;
   }
+
+  if (pendingRecovery) {
+    const action = await runPendingRecovery();
+    if (action === 'cutover' || action === 'recovered') return;
+  }
+
+  const sid = currentStreamId || lastStreamId;
+  if (isStreaming && sid) {
+    const p = await probeStream(sid, liveSeq);
+    await applyProbeVerdict(p, sid, liveSeq);
+    return;
+  }
+
+  if (!isStreaming && !activeStreamPollTimer) await checkActiveStream();
+  if (!isStreaming) await reconcileHistory();
+}
+
+// 放弃在途的 live 流（服务端重启等场景），但保留已经渲染出来的内容
+function abandonLiveStream() {
+  if (activeStreamPollTimer) { clearTimeout(activeStreamPollTimer); activeStreamPollTimer = null; }
+  try { currentAbortController?.abort(); } catch (_) {}
+  currentAbortController = null;
+  pendingRecovery = null;
+  if (currentStreamId) lastStreamId = currentStreamId;
+  currentStreamId = null;
+  isStreaming = false;
+  streamEl = null;
+  streamText = '';
+  removeThinkingIndicator();
+  tuiClear();
+  clearTuiHint();
+  setStatus('connected');
+  updateSendButton();
+}
+
+// 生命周期钩子：把"什么时候该重新探一次"这件事交给浏览器告诉我们，
+// 而不是靠一个 15s 的定时器猜。
+function installLifecycleHooks() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') { clearTimeout(healthTimer); return; }
+    healthBackoff = 0;
+    checkHealth({ force: true });
+  });
+  window.addEventListener('online', () => {
+    healthBackoff = 0;
+    if (connState === 'offline') setConnState('reconnecting');
+    checkHealth({ force: true });
+  });
+  window.addEventListener('offline', () => setConnState('offline'));
+  window.addEventListener('pageshow', e => {
+    // iOS Safari 从 bfcache 恢复时 visibilitychange 不保证触发
+    if (e.persisted) { healthBackoff = 0; checkHealth({ force: true }); }
+  });
+  window.addEventListener('focus', () => {
+    if (connState !== 'online') checkHealth({ force: true });
+  });
 }
 
 // ---- Send (Sensory Splice: always send, like IM) ----
@@ -2600,8 +3174,12 @@ function updateSendButton() {
 // ---- Stop turn ----
 async function stopCurrentTurn() {
   if (!isStreaming) return;
+  userStoppedStream = true;
+  pendingRecovery = null;
+  clearTuiHint();
   const btn = $tuiBar.querySelector('.tui-stop');
   if (btn) { btn.style.opacity = '0.3'; btn.style.pointerEvents = 'none'; }
+  if (activeStreamPollTimer) { clearTimeout(activeStreamPollTimer); activeStreamPollTimer = null; }
   try {
     if (currentStreamId) {
       await fetch(apiUrl('/api/stop'), {
@@ -2745,24 +3323,47 @@ function resetMessages() {
   scrollLock = true;
 }
 
-async function loadHistory() {
-  try {
-    const res = await fetch(apiUrl('/api/history?limit=100'));
-    if (!res.ok) return;
-    const data = await res.json();
-    resetMessages();
-    if (!data.messages || data.messages.length === 0) return;
+// ---- History reconciliation (P1-5) ------------------------------------------
+// 旧的 loadHistory() 是破坏性的：每条恢复路径都 resetMessages() + 重渲染 100 条，
+// 滚动位置跳变、正在流的 streamEl 被抹掉、移动端每次切 tab 回来都闪一下。
+// /api/history 的 HistoryMessage 是带 seq 的（http.rs:419-425），有 seq 就能增量对账。
+let lastHistorySeq = 0;
 
+// 本地已经渲染、但还没被历史游标覆盖的消息。用于避免"本地回显 + 历史对账"渲染两遍。
+let localEchoes = [];
+function normalizeEcho(text) { return (cleanContent(text || '') || '').replace(/\s+/g, ' ').trim(); }
+function noteLocalEcho(role, text) {
+  const t = normalizeEcho(text);
+  if (!t) return;
+  localEchoes.push({ role, text: t });
+  if (localEchoes.length > 40) localEchoes.shift();
+}
+function consumeLocalEcho(role, text) {
+  const t = normalizeEcho(text);
+  if (!t) return false;
+  for (let i = 0; i < localEchoes.length; i++) {
+    if (localEchoes[i].role === role && localEchoes[i].text === t) {
+      localEchoes.splice(i, 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+// 返回一个在**最后一批渲染完成时**才 resolve 的 Promise（修初始化竞态 P1-G / P2-H）
+function renderHistoryBatched(messages) {
+  return new Promise(resolve => {
+    if (!messages || !messages.length) { resolve(); return; }
     const BATCH = 10;
     let i = 0;
     const renderBatch = () => {
-      const end = Math.min(i + BATCH, data.messages.length);
+      const end = Math.min(i + BATCH, messages.length);
       for (; i < end; i++) {
-        const msg = data.messages[i];
+        const msg = messages[i];
         const ts = formatHistoryTime(msg.at);
         addMessage(msg.role === 'user' ? 'user' : 'being', msg.content, false, ts, msg.at);
       }
-      if (i < data.messages.length) {
+      if (i < messages.length) {
         scrollLock = true; // keep scroll locked between batches
         requestAnimationFrame(renderBatch);
       } else {
@@ -2772,15 +3373,67 @@ async function loadHistory() {
         $msgs.appendChild(sep);
         scrollLock = true;
         $msgs.scrollTop = $msgs.scrollHeight; // force scroll to bottom
+        resolve();
       }
     };
     requestAnimationFrame(renderBatch);
-  } catch (e) { console.warn('History load failed:', e); }
+  });
+}
+
+// 返回新追加的消息条数。full=true 才清屏（首次加载 / 服务端重启）。
+async function reconcileHistory({ full = false } = {}) {
+  try {
+    const res = await fetch(apiUrl('/api/history?limit=100'), { cache: 'no-store' });
+    if (!res.ok) return 0;
+    const data = await res.json();
+    const msgs = Array.isArray(data.messages) ? data.messages : [];
+    let added = 0;
+
+    if (full || lastHistorySeq === 0) {
+      resetMessages();
+      localEchoes = [];
+      await renderHistoryBatched(msgs);
+      added = msgs.length;
+    } else {
+      const fresh = msgs.filter(m => (Number(m.seq) || 0) > lastHistorySeq);
+      for (const m of fresh) {
+        const role = m.role === 'user' ? 'user' : 'being';
+        if (consumeLocalEcho(role, m.content)) continue;   // 本地已经渲染过了
+        addMessage(role, m.content, false, formatHistoryTime(m.at), m.at);
+        added++;
+      }
+      if (added) scrollToBottom();
+    }
+
+    if (msgs.length) {
+      lastHistorySeq = Math.max(lastHistorySeq, ...msgs.map(m => Number(m.seq) || 0));
+    }
+    return added;
+  } catch (e) {
+    console.warn('reconcileHistory failed:', e);
+    return 0;
+  }
+}
+
+// live 流结束后调用：只推进游标，不渲染（内容已经在屏幕上了）
+async function syncHistoryCursor() {
+  try {
+    const res = await fetch(apiUrl('/api/history?limit=5'), { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    const msgs = Array.isArray(data.messages) ? data.messages : [];
+    if (msgs.length) {
+      lastHistorySeq = Math.max(lastHistorySeq, ...msgs.map(m => Number(m.seq) || 0));
+    }
+  } catch (_) {}
 }
 
 async function checkActiveStream() {
   try {
-    const res = await fetch(apiUrl('/api/stream/active'));
+    const res = await fetch(apiUrl('/api/stream/active'), {
+      cache: 'no-store',
+      signal: timeoutSignal(8000),
+    });
     if (res.status === 204 || !res.ok) return;
     replayStream(await res.json());
   } catch (e) {
@@ -2799,11 +3452,13 @@ function replayStream(data) {
 
   isStreaming = true;
   currentStreamId = data.stream_id || null;
+  if (currentStreamId) lastStreamId = currentStreamId;
   streamEl = null;
   streamText = '';
   toolCount = 0;
   actionLogClear();
   removeThinkingIndicator();
+  resetLiveProgress();
   updateSendButton();
 
   const events = Array.isArray(data.events) ? data.events : [];
@@ -2847,36 +3502,66 @@ function replayStream(data) {
   const lastSeq = events.length
     ? Number(events[events.length - 1].seq) || 0
     : Math.max(0, (Number(data.next_seq) || 1) - 1);
+  liveSeq = lastSeq;
   pollActiveStream(data.stream_id, lastSeq);
 }
+
+// ---- Replay polling (P1-8) --------------------------------------------------
+// 旧实现：没有绝对截止、没有空转计数、网络异常时只是静默退避重试。
+// provider fallback / stub 部署下 ActiveStream 永远 finished:false + 空 events，
+// 会让 UI 永久"思考中"且 isStreaming 卡死。
+const POLL_ABSOLUTE_MAX_MS = 1800000;   // 30 min — 兜底硬截止
+const POLL_MAX_NET_FAILS = 6;
 
 function pollActiveStream(streamId, lastSeq) {
   let interval = 500;
   const MAX_INTERVAL = 5000;
   let cursor = lastSeq;
+  let netFails = 0;
+  const stall = makeStallTracker();
+  const deadline = Date.now() + POLL_ABSOLUTE_MAX_MS;
+
+  const reschedule = () => {
+    if (isStreaming) activeStreamPollTimer = setTimeout(poll, interval);
+  };
 
   const poll = async () => {
     activeStreamPollTimer = null;
     if (!isStreaming) return;
+    if (currentStreamId && currentStreamId !== streamId) return;   // 已经被别的流接管
+
+    if (Date.now() > deadline) {
+      console.warn('pollActiveStream: absolute deadline reached, falling back to history');
+      await recoverViaHistory();
+      return;
+    }
 
     let events = [];
+    let sawResponse = false;
     try {
-      const res = await fetch(apiUrl(`/api/stream/active?after=${cursor}`));
+      const res = await fetch(apiUrl(`/api/stream/active?after=${cursor}`), {
+        cache: 'no-store',
+        signal: timeoutSignal(15000),
+      });
+      sawResponse = true;
+      netFails = 0;
+      if (connState === 'reconnecting' || connState === 'offline') setConnState('online');
+
       if (res.status === 204) {
-        finalizeReplayStream();
+        // 流已被清理（10s 后台清理）→ 内容一定已经落盘
+        await recoverViaHistory();
         return;
       }
       if (!res.ok) {
         interval = Math.min(interval * 1.5, MAX_INTERVAL);
-        if (isStreaming) {
-          activeStreamPollTimer = setTimeout(poll, interval);
-        }
+        reschedule();
         return;
       }
 
       const data = await res.json();
       if (data.stream_id !== streamId) {
-        finalizeReplayStream();
+        // 别的 tab 起了新流 → 对齐内容而不是静默 finalize
+        await recoverViaHistory();
         return;
       }
 
@@ -2885,7 +3570,7 @@ function pollActiveStream(streamId, lastSeq) {
         const seq = Number(item.seq);
         if (Number.isFinite(seq) && seq <= cursor) continue;
         processReplayEvent(item.event, item.data || {});
-        if (Number.isFinite(seq)) cursor = Math.max(cursor, seq);
+        if (Number.isFinite(seq)) { cursor = Math.max(cursor, seq); liveSeq = cursor; }
         if (!isStreaming) return;
       }
 
@@ -2894,24 +3579,51 @@ function pollActiveStream(streamId, lastSeq) {
         return;
       }
     } catch (e) {
+      netFails++;
       console.warn('pollActiveStream error:', e);
+      if (netFails >= 2) {
+        setConnState(navigator.onLine === false ? 'offline' : 'reconnecting');
+      }
+      if (netFails >= POLL_MAX_NET_FAILS) {
+        // 连续失败太多次：交给连接状态机，恢复后 onReconnected 会 probe 回来
+        console.warn('pollActiveStream: giving up polling, handing off to connection state machine');
+        queueDisconnectRecovery(streamId, cursor);
+        isStreaming = false;
+        updateSendButton();
+        return;
+      }
     }
 
     if (events.length > 0) {
-      interval = 500;  // got data, poll fast
+      interval = 500;      // got data, poll fast
+      stall.reset();
     } else {
-      interval = Math.min(interval * 1.5, MAX_INTERVAL);  // no data, slow down
+      interval = Math.min(interval * 1.5, MAX_INTERVAL);   // no data, slow down
+      // 空转：既没有事件也没有 finished。可能是 provider/stub 路径（永远不写缓冲），
+      // 也可能是真卡住。按相位预算升级提示，超过总预算就回落历史对账。
+      if (sawResponse) {
+        const stalledFor = stalledForMs();
+        updateStallHint(stalledFor);
+        if (stalledFor >= stallBudgetMs() && stall.dueForProbe()) {
+          const { totalMs, nextInMs } = stall.onStalled();
+          if (totalMs >= STALL_GIVEUP_MS) {
+            console.warn('pollActiveStream: stalled past budget, falling back to history');
+            await recoverViaHistory();
+            return;
+          }
+          setTuiHint(`服务端也没有新进展，${Math.round(nextInMs / 1000)} 秒后再检查一次`);
+        }
+      }
     }
 
-    if (isStreaming) {
-      activeStreamPollTimer = setTimeout(poll, interval);
-    }
+    reschedule();
   };
 
   activeStreamPollTimer = setTimeout(poll, interval);
 }
 
 function processReplayEvent(eventType, eventData) {
+  markProgress(eventType, eventData);
   switch (eventType) {
     case 'content_block_delta': {
       const text = eventData.delta?.text || '';
@@ -2919,15 +3631,20 @@ function processReplayEvent(eventType, eventData) {
       removeThinkingIndicator();
       tuiClear();
       streamText += text;
-      const visibleText = cleanContent(streamText);
       if (!streamEl) {
+        const visibleText = cleanContent(streamText);
         if (visibleText) streamEl = addMessage('being', visibleText, true);
-      } else if (visibleText) {
-        streamEl.innerHTML = renderMarkdown(visibleText);
-        scrollToBottom();
-      } else {
-        streamEl.parentElement.remove();
-        streamEl = null;
+      } else if (!renderTimer) {
+        renderTimer = requestAnimationFrame(() => {
+          renderTimer = null;
+          if (streamEl && streamText) {
+            const visible = cleanContent(streamText);
+            if (visible) {
+              streamEl.innerHTML = renderMarkdown(visible);
+              scrollToBottom();
+            }
+          }
+        });
       }
       break;
     }
@@ -2995,7 +3712,8 @@ function processReplayEvent(eventType, eventData) {
       tuiClear();
       actionLogClear();
       updateSendButton();
-      loadHistory();
+      clearTuiHint();
+      reconcileHistory();
       scheduleFlushQueue();
       break;
   }
@@ -3015,16 +3733,20 @@ function finalizeReplayStream() {
   }
 
   isStreaming = false;
+  if (currentStreamId) lastStreamId = currentStreamId;
   currentStreamId = null;
   streamEl = null;
   streamText = '';
+  pendingRecovery = null;
   setStatus('connected');
   tuiDone();
+  clearTuiHint();
   removeThinkingIndicator();
   lastSendFailed = false;
   updateSendButton();
-  // 不调 loadHistory — replay 已渲染完整内容，loadHistory 会擦掉它
-  // 下次用户发消息时自然触发新的 stream 流程
+  // 不做历史渲染 — 内容已经在屏幕上了，只推进游标，
+  // 这样之后的增量对账不会把刚流出来的回复再画一遍
+  syncHistoryCursor();
   scheduleFlushQueue();
 }
 
@@ -3079,24 +3801,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
     })
     .catch(() => {});
-  
-  await loadHistory();
-  connected = true; // 防止 checkHealth 的首次 reconnect 再调 loadHistory
-  setStatus('connected'); // 状态点初始化为绿色
-  await checkActiveStream();
-  checkHealth();
-  let healthInterval = setInterval(checkHealth, 15000);
-  $input.focus();
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      checkHealth();
-      if (!healthInterval) healthInterval = setInterval(checkHealth, 15000);
-      if (!isStreaming && !activeStreamPollTimer) loadHistory();
-    } else {
-      if (healthInterval) { clearInterval(healthInterval); healthInterval = null; }
-    }
-  });
+  // 全量渲染历史，等**渲染真正完成**再检查活跃流。
+  // （旧实现里 loadHistory 启动 rAF 批渲染就 return 了，100 条历史要 10 帧 ≈ 160ms，
+  //   checkActiveStream 的 replay 消息会插进历史消息中间——本地部署稳定复现。）
+  await reconcileHistory({ full: true });
+  connState = 'online';           // 初始化时直接置 online，避免首个 checkHealth 触发多余的 onReconnected
+  setStatus('connected');
+  installLifecycleHooks();
+  await checkActiveStream();
+  checkHealth({ force: true });
+  $input.focus();
 });
 </script>
 </body>

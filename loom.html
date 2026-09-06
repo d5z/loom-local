@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="loom-version" content="1.3.0">
 <title>Loom</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
@@ -223,15 +224,24 @@ html, body {
   min-height: var(--header-height);
 }
 #status-dot {
-  width: 8px; height: 8px; border-radius: 50%;
+  width: 9px; height: 9px; border-radius: 50%;
   background: var(--text-muted);
   flex-shrink: 0;
   transition: background 0.3s;
+  cursor: pointer;
 }
 #status-dot.connected { background: var(--green); animation: breathe 3s ease-in-out infinite; }
 #status-dot.thinking { background: var(--purple); animation: pulse 1.2s ease-in-out infinite; }
 #status-dot.error { background: var(--red); animation: pulse 1.2s ease-in-out infinite; }
 #status-dot.reconnecting { background: var(--yellow); animation: pulse 1.2s ease-in-out infinite; }
+
+/* SBS layer — sits on top of the connection-state rules above, so it must be
+   declared after them (same specificity, later wins). The colour still comes
+   from the connection state; only the liveliness changes. */
+#status-dot.sbs-off { animation: none; opacity: 0.4; }
+#status-dot.sbs-off:hover { opacity: 0.6; }
+#status-dot.waking { animation: ripple 0.6s ease-out; opacity: 1; }
+#status-dot.sleeping { animation: falling-asleep 0.8s ease-out forwards; }
 
 /* Reconnect banner */
 #reconnect-banner {
@@ -243,17 +253,33 @@ html, body {
   font-family: var(--mono);
 }
 #reconnect-banner.active { display: block; }
-@keyframes breathe { 0%,100%{opacity:0.6} 50%{opacity:1} }
+@keyframes breathe { 0%,100%{opacity:0.45;transform:scale(1)} 50%{opacity:1;transform:scale(1.2)} }
 @keyframes pulse { 0%,100%{opacity:0.4;transform:scale(1)} 50%{opacity:1;transform:scale(1.3)} }
+/* Waking up: one ring pushes out from the dot and dissolves. */
+@keyframes ripple {
+  0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.6); }
+  100% { box-shadow: 0 0 0 12px rgba(76, 175, 80, 0); }
+}
+/* Falling asleep: one last slow breath that settles into the dim resting level.
+   Opacity is animated (not transitioned) because `breathe` owns opacity too —
+   a transition would be overridden by whichever animation is still running. */
+@keyframes falling-asleep {
+  0%   { opacity: 1; }
+  45%  { opacity: 0.55; }
+  75%  { opacity: 0.75; }
+  100% { opacity: 0.4; }
+}
 
+/* No longer clickable — the soul card lost its only entry point when the dot
+   became the SBS switch. Keeping a pointer cursor / hover accent here would
+   promise a click that does nothing. */
 #being-name {
-  font-size: 14px; font-weight: 600; cursor: pointer;
+  font-size: 14px; font-weight: 600;
   color: var(--text);
   transition: var(--transition-fast);
   min-height: 44px; display: flex; align-items: center;
   padding: 0 10px; margin-left: -10px; border-radius: 12px;
 }
-#being-name:hover { color: var(--accent); background: var(--hover-overlay); }
 
 /* Privacy Shield panel */
 #privacy-panel {
@@ -977,8 +1003,8 @@ html, body {
 
 <div id="app">
   <div id="header">
-    <div id="status-dot"></div>
-    <div id="being-name" onclick="toggleSoulCard()">being</div>
+    <div id="status-dot" onclick="toggleSbs()"></div>
+    <div id="being-name">being</div>
     <div style="flex:1"></div>
     <a href="https://beings.town" target="_blank" class="btn-icon" title="Beings Town"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg></a>
     <button class="btn-icon" onclick="togglePrivacy()" title="Privacy Shield"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></button>
@@ -1087,10 +1113,57 @@ html, body {
     </div>
 
     <div id="cfg-status" style="padding:0 16px"></div>
+    <div style="padding:12px 16px 8px;text-align:center;font-size:11px;color:var(--text-muted);opacity:0.5">Loom v<span id="loom-ver"></span></div>
   </div>
 </div>
 
 
+
+<!-- ── 首屏预取（P1）──────────────────────────────────────────────────────
+     必须在任何 CDN script / stylesheet 标签之前。
+     原因：下面那个 cdnjs 的 stylesheet link 会阻塞其后所有 parser-inserted
+     inline script 的执行，而 defer 脚本又会推迟 DOMContentLoaded。两者叠加使得
+     "DOMContentLoaded 里才 fetch /api/*" 的写法把第一方请求排在 CDN 之后。
+     这里把三个第一方请求提前发出，CDN 与 API 并行下载。 -->
+<script>
+// User Timing 打点（旧环境/测试 harness 里 performance.mark 可能缺席，静默降级）
+const pmark = n => { try { performance.mark(n); } catch (_) {} };
+pmark('loom:head');
+
+// Config —— apiUrl 依赖的全部是 URL 解析，可以在这里就绪。
+// 鉴权走 ?token= query param（见 apiUrl），不需要额外 header。
+const _pathBase = location.pathname.replace(/\/+$/, '');
+const API_URL = new URL(location.href).searchParams.get('api') || (location.origin + _pathBase);
+const LOOM_TOKEN = new URL(location.href).searchParams.get('token') || '';
+const RELAY_SECRET = new URL(location.href).searchParams.get('relay_secret') || new URL(location.href).searchParams.get('secret') || LOOM_TOKEN;
+function apiUrl(path) {
+  const sep = path.includes('?') ? '&' : '?';
+  return LOOM_TOKEN ? `${API_URL}${path}${sep}token=${LOOM_TOKEN}` : `${API_URL}${path}`;
+}
+
+// 预取的 Response 只能读一次，用 takePrefetch() 一次性取走；
+// 取空或失败时调用方回落到自己 fetch。
+const _prefetch = {
+  history: fetch(apiUrl('/api/history?limit=100'), { cache: 'no-store' }),
+  status: fetch(apiUrl('/api/status')),
+  active: fetch(apiUrl('/api/stream/active'), { cache: 'no-store' }),
+};
+// 未被消费前先挂个 catch，避免 unhandled rejection 噪音。
+for (const k of Object.keys(_prefetch)) _prefetch[k].catch(() => {});
+pmark('loom:prefetch-sent');
+
+async function takePrefetch(key) {
+  const p = _prefetch[key];
+  if (!p) return null;
+  _prefetch[key] = null;
+  try {
+    return await p;
+  } catch (e) {
+    console.warn(`prefetch ${key} failed:`, e);
+    return null;
+  }
+}
+</script>
 
 <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
@@ -1106,6 +1179,7 @@ html, body {
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/shell.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
 <script>
+const LOOM_VERSION = "1.3.0";
 const $ = s => document.querySelector(s);
 const $msgs = $('#messages');
 const $input = $('#input');
@@ -1118,16 +1192,7 @@ const $activityLog = $('#activity-log');
 const $sendBtn = $('#send-btn');
 const $reconnectBanner = $('#reconnect-banner');
 
-// Config
-// Derive API base from URL path (e.g. /alice/ → /alice, / → '')
-const _pathBase = location.pathname.replace(/\/+$/, '');
-const API_URL = new URL(location.href).searchParams.get('api') || (location.origin + _pathBase);
-const LOOM_TOKEN = new URL(location.href).searchParams.get('token') || '';
-const RELAY_SECRET = new URL(location.href).searchParams.get('relay_secret') || new URL(location.href).searchParams.get('secret') || LOOM_TOKEN;
-function apiUrl(path) {
-  const sep = path.includes('?') ? '&' : '?';
-  return LOOM_TOKEN ? `${API_URL}${path}${sep}token=${LOOM_TOKEN}` : `${API_URL}${path}`;
-}
+// Config（_pathBase / API_URL / LOOM_TOKEN / RELAY_SECRET / apiUrl 见文件顶部预取 script）
 let sessionId = null;
 let isStreaming = false, streamEl = null, streamText = '';
 let renderTimer = null;
@@ -1151,6 +1216,15 @@ let lastMessageTime = null;
 let currentAbortController = null;
 let currentStreamId = null;
 let lastStreamId = null;          // 断线恢复需要它——currentStreamId 会在收尾时被清掉
+// F1: 外部（非 watchdog）发起的 cutover 会 abort 正在跑的 live reader。
+// reader 的 catch 靠这个槽把 AbortError 认成"已经交接给 replay 通道"，
+// 而不是走 handleStreamError → finalizeSendCleanup（那会把 isStreaming 打回 false，
+// 连刚起来的 poller 一起杀掉）。
+let externalCutover = null;
+// F2: 写者所有权令牌。streamEl / streamText 同一时刻只允许一个写者。
+// 每个 reader / poller 启动时 ++writerEpoch 并记住自己的号；写之前对一次号，
+// 对不上就静默丢弃。任何路径上的重叠都因此变得无害。
+let writerEpoch = 0;
 let sendQueue = [];
 let thinkingEl = null;
 let activeStreamPollTimer = null;
@@ -1217,6 +1291,9 @@ async function loadLlmConfig() {
     const t = cfg.temperature != null ? cfg.temperature : 1;
     tempSlider.value = t;
     tempVal.textContent = Number(t).toFixed(1);
+    // Someone may have flipped SBS elsewhere (attune, another Loom tab) —
+    // resync the dot without animating a change the human did not just make.
+    if (typeof cfg.sbs_enabled === 'boolean') setSbsEnabled(cfg.sbs_enabled, false);
   } catch (e) {
     setConfigStatus('✗ ' + e.message, 'error');
   }
@@ -1601,9 +1678,79 @@ function effectiveDotClass() {
   return streamStatus || 'connected';
 }
 
+// ── SBS switch: the dot is the switch ──
+// The dot already carries the connection state (colour); SBS rides on top of it
+// as liveliness — breathing when the being's own heartbeat runs, dim and still
+// when it only wakes for you. Every write to $dot.className goes through
+// applyDotClass so the two layers can never overwrite each other.
+let sbsEnabled = true;
+let sbsTransition = '';   // '' | 'waking' | 'sleeping'
+let sbsTransitionTimer = null;
+let sbsToggling = false;
+
+function applyDotClass() {
+  const base = effectiveDotClass();
+  const classes = [base];
+  // `thinking` is exempt from the dim: SBS-off means "does not start on its
+  // own", not "is idle". A being answering you right now must still look like
+  // it is working, and the purple pulse is the only place that shows.
+  if (sbsTransition) classes.push(sbsTransition);
+  else if (!sbsEnabled && base !== 'thinking') classes.push('sbs-off');
+  $dot.className = classes.join(' ');
+  $dot.title = sbsEnabled
+    ? '并肩基底开着：心跳自己跳（点一下让它睡）'
+    : '并肩基底关着：只在你说话时醒（点一下叫醒它）';
+}
+
+// `animate` is false on load — a dot that ripples every time you open Loom
+// would be announcing a state change that did not happen.
+function setSbsEnabled(enabled, animate) {
+  const changed = enabled !== sbsEnabled;
+  sbsEnabled = enabled;
+  clearTimeout(sbsTransitionTimer);
+  if (!animate || !changed) {
+    sbsTransition = '';
+    applyDotClass();
+    return;
+  }
+  sbsTransition = enabled ? 'waking' : 'sleeping';
+  applyDotClass();
+  // Keyframe durations live in CSS (#status-dot.waking / .sleeping); these must
+  // match, otherwise the class is dropped mid-animation and the dot snaps.
+  sbsTransitionTimer = setTimeout(() => {
+    sbsTransition = '';
+    applyDotClass();
+  }, enabled ? 600 : 800);
+}
+
+async function toggleSbs() {
+  if (sbsToggling) return;
+  sbsToggling = true;
+  try {
+    const next = !sbsEnabled;
+    const data = await applyConfigChange({ sbs_enabled: next ? 'on' : 'off' });
+    // Trust the server's echo, not our optimistic guess: a rejected patch must
+    // leave the dot showing what the being is actually doing.
+    if (data && data.ok && data.config) {
+      setSbsEnabled(!!data.config.sbs_enabled, true);
+    }
+  } finally {
+    sbsToggling = false;
+  }
+}
+
+async function loadSbsState() {
+  try {
+    const res = await fetch(apiUrl('/api/llm/config'));
+    if (!res.ok) return;
+    const cfg = await readJsonResponse(res);
+    if (typeof cfg.sbs_enabled === 'boolean') setSbsEnabled(cfg.sbs_enabled, false);
+  } catch (_) {}
+}
+
 function setStatus(state) {
   streamStatus = state;
-  $dot.className = effectiveDotClass();
+  applyDotClass();
   updateSendButton();
 }
 
@@ -1618,7 +1765,7 @@ const CONN_BANNER = {
 function setConnState(next, detail) {
   if (connState === next) return;
   connState = next;
-  $dot.className = effectiveDotClass();
+  applyDotClass();
   const banner = CONN_BANNER[next];
   if (banner) {
     $reconnectBanner.textContent = detail ? `${banner}（${detail}）` : banner;
@@ -2402,7 +2549,17 @@ async function probeStream(streamId, localSeq) {
 // 从 after=localSeq 接上去文字严丝合缝，一个字不重不漏。
 function cutoverToReplay(streamId, fromSeq) {
   if (activeStreamPollTimer) { clearTimeout(activeStreamPollTimer); activeStreamPollTimer = null; }
+  // F1: live reader 还活着就必须先杀掉它。
+  // 只把 currentAbortController 置 null 不会停下 reader——它握着自己的 res.body，
+  // 会继续和下面起的 poller 同时往 streamEl / streamText 写：文字重复、交错，
+  // 偶尔还会多冒一个 typing 气泡（"两个线程同时在想"）。
+  // watchdog 内部路径进来时 signal 已经 aborted，不重复记 externalCutover。
+  const liveReader = currentAbortController;
   currentAbortController = null;
+  if (liveReader && !liveReader.signal?.aborted) {
+    externalCutover = { streamId, localSeq: fromSeq };
+    try { liveReader.abort(); } catch (_) {}
+  }
   pendingRecovery = null;
   isStreaming = true;
   currentStreamId = streamId;
@@ -2419,6 +2576,7 @@ function cutoverToReplay(streamId, fromSeq) {
 // assistant moment 先落盘后发 Done，所以这条路一定能拿到完整回复。
 async function recoverViaHistory() {
   if (activeStreamPollTimer) { clearTimeout(activeStreamPollTimer); activeStreamPollTimer = null; }
+  writerEpoch++;   // F2: 作废所有在途写者，别让残存的 reader 往新屏幕上写
   const partialEl = streamEl;
   const partialText = streamText;
   streamEl = null;
@@ -2508,6 +2666,7 @@ async function consumeChatStream(res, msg, filesToSend) {
   let sawServerError = false;
   let cutoverRequest = null;        // probe 判定 progressing/finished → 热切换到 replay
   let historyRecoveryRequested = false;   // probe 判定 gone/superseded → 回落历史对账
+  externalCutover = null;           // 新流开始，清掉上一条流可能残留的交接意图
 
   const killWatchdog = () => {
     if (streamTimeoutId) { clearInterval(streamTimeoutId); streamTimeoutId = null; }
@@ -2562,6 +2721,7 @@ async function consumeChatStream(res, msg, filesToSend) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    const myEpoch = ++writerEpoch;   // F2: 我是当前唯一合法写者
     streamEl = null;
     streamText = '';
     toolCount = 0;
@@ -2624,6 +2784,7 @@ async function consumeChatStream(res, msg, filesToSend) {
           if (eventType === 'content_block_delta') {
             const text = data.delta?.text || '';
             if (!text) continue;
+            if (myEpoch !== writerEpoch) continue;   // F2: 已被 poller 接管，静默丢弃
             removeThinkingIndicator();
             tuiClear();
             streamText += text;
@@ -2633,8 +2794,10 @@ async function consumeChatStream(res, msg, filesToSend) {
             }
             // Smooth streaming: rAF for visual updates, markdown re-parse throttled
             if (!renderTimer) {
+              const rafEpoch = writerEpoch;
               renderTimer = requestAnimationFrame(() => {
                 renderTimer = null;
+                if (rafEpoch !== writerEpoch) return;   // F2
                 if (streamEl && streamText) {
                   const visible = cleanContent(streamText);
                   if (visible) {
@@ -2709,20 +2872,23 @@ async function consumeChatStream(res, msg, filesToSend) {
           }
           
           if (eventType === 'message_stop') {
-            // Clear throttle timer and do final render
+            if (myEpoch !== writerEpoch) continue;   // F2
+            // F3: message_stop = end-of-reply，**不是** end-of-turn。
+            // 被 yield 打断的呼吸会在同一条 SSE 上继续发续写 delta；
+            // 旧实现留着 streamEl 不放，续写就被粘进用户第二条消息**上面**那个旧气泡里。
+            // 这里把气泡定稿并交出去，续写会自然拿到一个新气泡。
+            // isStreaming 保持 true —— 真正的 end-of-turn 是 SSE 关闭（reader 循环结束）。
             if (renderTimer) { cancelAnimationFrame(renderTimer); renderTimer = null; }
             removeThinkingIndicator();
             if (streamEl) {
               streamEl.classList.remove('stream-cursor');
               const visibleText = cleanContent(streamText);
               if (visibleText) streamEl.innerHTML = renderMarkdown(visibleText);
-              else {
-                streamEl.parentElement.remove();
-                streamEl = null;
-              }
+              else streamEl.parentElement.remove();
             }
+            streamEl = null;
+            streamText = '';
             if (data.session_id) sessionId = data.session_id;
-            isStreaming = false;
             setStatus('connected');
             tuiDone();
             clearTuiHint();
@@ -2731,6 +2897,7 @@ async function consumeChatStream(res, msg, filesToSend) {
           }
           
           if (eventType === 'error') {
+            if (myEpoch !== writerEpoch) continue;   // F2: poller 会从缓冲里拿到同一条 error
             sawServerError = true;
             removeThinkingIndicator();
             addMessage('system', '⚠ ' + (data.message || 'unknown error'));
@@ -2753,7 +2920,9 @@ async function consumeChatStream(res, msg, filesToSend) {
       }
     }
     
-    if (streamText) {
+    // SSE 关闭 = end-of-turn。走到这里说明流末尾还有没被 message_stop 定稿的文字
+    // （断在续写中途等），补一次定稿。
+    if (streamText && myEpoch === writerEpoch) {
       if (renderTimer) { cancelAnimationFrame(renderTimer); renderTimer = null; }
       removeThinkingIndicator();
       const visibleText = cleanContent(streamText);
@@ -2770,12 +2939,31 @@ async function consumeChatStream(res, msg, filesToSend) {
       tuiDone();
     }
 
+    // 走到这里我可能已经被 cutover 接管了（abort 和"字节流刚好读完"赛跑，
+    // reader 有可能不抛 AbortError 就正常结束）。这种情况下收尾归新写者管，
+    // 绝不能让 finalizeSendCleanup 把 isStreaming 打回 false —— 那会顺手杀掉 poller。
+    const staleWriter = myEpoch !== writerEpoch;
+    if (staleWriter) externalCutover = null;
     return {
       outcome: sawServerError ? 'server_error' : 'done',
+      handled: staleWriter,
       streamId: currentStreamId || lastStreamId,
       localSeq: liveSeq,
     };
   } catch (e) {
+    // F1: cutoverToReplay 从外部（重连 probe / 超时按钮）把我 abort 掉了。
+    // 那边已经起好 poller 并把 isStreaming 置 true，这里只需要安静退场：
+    // handled:true 让 driveChatStream 跳过 finalizeSendCleanup。
+    if (e.name === 'AbortError' && externalCutover) {
+      const ext = externalCutover;
+      externalCutover = null;
+      return {
+        outcome: 'switch_to_replay',
+        handled: true,
+        streamId: ext.streamId,
+        localSeq: ext.localSeq,
+      };
+    }
     // watchdog 主动 abort 的两条自愈路径：调用方不该把它们当成错误
     if (e.name === 'AbortError' && cutoverRequest) {
       return {
@@ -2806,6 +2994,7 @@ async function consumeChatStream(res, msg, filesToSend) {
 function finalizeSendCleanup() {
   if (renderTimer) { cancelAnimationFrame(renderTimer); renderTimer = null; }
   currentAbortController = null;
+  externalCutover = null;
   if (currentStreamId) lastStreamId = currentStreamId;
   currentStreamId = null;
   isStreaming = false;
@@ -2961,8 +3150,9 @@ async function driveChatStream(res, msg, filesToSend) {
     if (result.outcome === 'switch_to_replay') {
       // watchdog probe 判定服务端仍在推进：SSE 管道死了但 breath 活着。
       // 保留 streamEl / streamText，从 localSeq 处热切换到 replay 通道。
+      // handled:true = 外部已经 cutover 过了（F1），再切一次会起第二个 poller。
       handedOff = true;
-      cutoverToReplay(result.streamId, result.localSeq);
+      if (!result.handled) cutoverToReplay(result.streamId, result.localSeq);
     } else if (result.handled) {
       handedOff = true;   // gone / superseded：recoverViaHistory 已经做完收尾
     }
@@ -3124,6 +3314,8 @@ function abandonLiveStream() {
   if (activeStreamPollTimer) { clearTimeout(activeStreamPollTimer); activeStreamPollTimer = null; }
   try { currentAbortController?.abort(); } catch (_) {}
   currentAbortController = null;
+  externalCutover = null;
+  writerEpoch++;   // F2: 作废在途写者
   pendingRecovery = null;
   if (currentStreamId) lastStreamId = currentStreamId;
   currentStreamId = null;
@@ -3383,7 +3575,9 @@ function renderHistoryBatched(messages) {
 // 返回新追加的消息条数。full=true 才清屏（首次加载 / 服务端重启）。
 async function reconcileHistory({ full = false } = {}) {
   try {
-    const res = await fetch(apiUrl('/api/history?limit=100'), { cache: 'no-store' });
+    // 首次调用直接吃顶部预取的结果（已经在 CDN 下载期间跑完了）
+    const res = (await takePrefetch('history'))
+      || (await fetch(apiUrl('/api/history?limit=100'), { cache: 'no-store' }));
     if (!res.ok) return 0;
     const data = await res.json();
     const msgs = Array.isArray(data.messages) ? data.messages : [];
@@ -3430,11 +3624,12 @@ async function syncHistoryCursor() {
 
 async function checkActiveStream() {
   try {
-    const res = await fetch(apiUrl('/api/stream/active'), {
-      cache: 'no-store',
-      signal: timeoutSignal(8000),
-    });
-    if (res.status === 204 || !res.ok) return;
+    const res = (await takePrefetch('active'))
+      || (await fetch(apiUrl('/api/stream/active'), {
+        cache: 'no-store',
+        signal: timeoutSignal(8000),
+      }));
+    if (!res || res.status === 204 || !res.ok) return;
     replayStream(await res.json());
   } catch (e) {
     console.warn('checkActiveStream failed:', e);
@@ -3453,6 +3648,7 @@ function replayStream(data) {
   isStreaming = true;
   currentStreamId = data.stream_id || null;
   if (currentStreamId) lastStreamId = currentStreamId;
+  writerEpoch++;   // F2: 接管写权
   streamEl = null;
   streamText = '';
   toolCount = 0;
@@ -3468,6 +3664,14 @@ function replayStream(data) {
       case 'content_block_delta':
         streamText += eventData.delta?.text || '';
         break;
+      case 'message_stop': {
+        // F3: 缓冲里可能有多个 message_stop（yield 续写）。每个都要落成独立气泡，
+        // 否则追赶渲染会把两次回复和中间那条用户消息的顺序搅在一起。
+        const replied = cleanContent(streamText);
+        if (replied) addMessage('being', replied, false);
+        streamText = '';
+        break;
+      }
       case 'thinking':
       case 'reasoning':
         setStatus('thinking');
@@ -3520,14 +3724,16 @@ function pollActiveStream(streamId, lastSeq) {
   let netFails = 0;
   const stall = makeStallTracker();
   const deadline = Date.now() + POLL_ABSOLUTE_MAX_MS;
+  const myEpoch = ++writerEpoch;   // F2: 接管写权，作废可能还活着的 live reader
 
   const reschedule = () => {
-    if (isStreaming) activeStreamPollTimer = setTimeout(poll, interval);
+    if (isStreaming && myEpoch === writerEpoch) activeStreamPollTimer = setTimeout(poll, interval);
   };
 
   const poll = async () => {
     activeStreamPollTimer = null;
     if (!isStreaming) return;
+    if (myEpoch !== writerEpoch) return;   // F2: 已经被更新的写者接管
     if (currentStreamId && currentStreamId !== streamId) return;   // 已经被别的流接管
 
     if (Date.now() > deadline) {
@@ -3571,7 +3777,7 @@ function pollActiveStream(streamId, lastSeq) {
         if (Number.isFinite(seq) && seq <= cursor) continue;
         processReplayEvent(item.event, item.data || {});
         if (Number.isFinite(seq)) { cursor = Math.max(cursor, seq); liveSeq = cursor; }
-        if (!isStreaming) return;
+        if (!isStreaming || myEpoch !== writerEpoch) return;
       }
 
       if (data.finished) {
@@ -3635,8 +3841,10 @@ function processReplayEvent(eventType, eventData) {
         const visibleText = cleanContent(streamText);
         if (visibleText) streamEl = addMessage('being', visibleText, true);
       } else if (!renderTimer) {
+        const rafEpoch = writerEpoch;
         renderTimer = requestAnimationFrame(() => {
           renderTimer = null;
+          if (rafEpoch !== writerEpoch) return;   // F2
           if (streamEl && streamText) {
             const visible = cleanContent(streamText);
             if (visible) {
@@ -3699,7 +3907,10 @@ function processReplayEvent(eventType, eventData) {
       break;
     }
     case 'message_stop':
-      finalizeReplayStream();
+      // F3: 和 live 通道同一套语义——message_stop 只结束一次回复。
+      // 整条 breath 是否结束由服务端的 finished 说了算（F4 之后它只在
+      // engine task 真正跑完时才置位），yield 续写会继续往同一条流里写。
+      finalizeReplayReply();
       break;
     case 'error':
       if (activeStreamPollTimer) clearTimeout(activeStreamPollTimer);
@@ -3719,18 +3930,35 @@ function processReplayEvent(eventType, eventData) {
   }
 }
 
+// 一次回复收尾（end-of-reply）：把当前气泡定稿并交出去，但**不**结束轮询。
+// 续写会拿到一个全新的气泡。
+function finalizeReplayReply() {
+  if (renderTimer) { cancelAnimationFrame(renderTimer); renderTimer = null; }
+  solidifyReplayBubble();
+  streamEl = null;
+  streamText = '';
+  removeThinkingIndicator();
+  setStatus('connected');
+  tuiDone();
+  clearTuiHint();
+  lastSendFailed = false;
+  syncHistoryCursor();
+}
+
+function solidifyReplayBubble() {
+  if (!streamEl) return;
+  streamEl.classList.remove('stream-cursor');
+  const finalText = cleanContent(streamText);
+  if (finalText) streamEl.innerHTML = renderMarkdown(finalText);
+  else streamEl.closest('.message')?.remove();
+}
+
 function finalizeReplayStream() {
   if (activeStreamPollTimer) clearTimeout(activeStreamPollTimer);
   activeStreamPollTimer = null;
 
   // 先把 streamText 固化为正式消息（如果还没渲染）
-  if (streamText && streamEl) {
-    const finalText = cleanContent(streamText);
-    if (finalText) {
-      streamEl.innerHTML = renderMarkdown(finalText);
-      streamEl.closest('.message')?.classList.remove('streaming');
-    }
-  }
+  solidifyReplayBubble();
 
   isStreaming = false;
   if (currentStreamId) lastStreamId = currentStreamId;
@@ -3767,8 +3995,28 @@ function updatePlaceholder() {
 }
 
 // ---- Init ----
+// 首屏 timing：一行 summary 打到 console，配合 P1/P2 的效果验证。
+function logFirstPaintTiming() {
+  try {
+    const m = (name, from, to) => {
+      try { return Math.round(performance.measure(name, from, to).duration); }
+      catch (_) { return -1; }
+    };
+    const prefetch = m('loom:prefetch', 'loom:head', 'loom:prefetch-sent');
+    const cdn = m('loom:cdn-block', 'loom:prefetch-sent', 'loom:dcl');
+    const history = m('loom:history', 'loom:dcl', 'loom:history-rendered');
+    const total = Math.round(performance.now());
+    console.log(
+      `[loom] first-load: prefetch ${prefetch}ms · cdn+parse ${cdn}ms · history ${history}ms · ready ${total}ms`
+    );
+  } catch (_) {}
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+  pmark('loom:dcl');
   initMarkdown();
+  const verEl = document.getElementById('loom-ver');
+  if (verEl) verEl.textContent = LOOM_VERSION;
   const params = new URL(location.href).searchParams;
   beingName = params.get('name') || 'being';
   $name.textContent = beingName;
@@ -3781,8 +4029,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.visualViewport.addEventListener('scroll', updateViewportHeight);
   }
   
-  fetch(apiUrl('/api/status'))
-    .then(r => r.json())
+  (async () => {
+    const res = (await takePrefetch('status')) || (await fetch(apiUrl('/api/status')));
+    return res.json();
+  })()
     .then(data => {
       const name = data.being_name || data.name;
       if (name) {
@@ -3806,12 +4056,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   // （旧实现里 loadHistory 启动 rAF 批渲染就 return 了，100 条历史要 10 帧 ≈ 160ms，
   //   checkActiveStream 的 replay 消息会插进历史消息中间——本地部署稳定复现。）
   await reconcileHistory({ full: true });
+  pmark('loom:history-rendered');
   connState = 'online';           // 初始化时直接置 online，避免首个 checkHealth 触发多余的 onReconnected
   setStatus('connected');
+  loadSbsState();                 // 不 await：点的初始明暗不该拖慢首屏
   installLifecycleHooks();
   await checkActiveStream();
   checkHealth({ force: true });
   $input.focus();
+  pmark('loom:ready');
+  logFirstPaintTiming();
 });
 </script>
 </body>

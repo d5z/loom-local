@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="loom-version" content="1.3.0">
+<meta name="loom-version" content="1.7.0">
 <title>Loom</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
@@ -536,6 +536,14 @@ html, body {
   text-align: center; color: var(--text-ghost);
   font-size: 10px; padding: 16px 0 8px; font-family: var(--mono);
   letter-spacing: 2px; text-transform: uppercase; opacity: 0.5;
+}
+
+/* Breath marker: engine-written `[breath yielded to human]` & co. from
+   /api/history (from: "system"). A divider, not a chat bubble. */
+.breath-marker {
+  text-align: center; color: var(--text-ghost);
+  font-size: 11px; padding: 6px 0 10px; opacity: 0.6;
+  animation: fadeIn 0.2s ease;
 }
 
 .message.system .retry-btn {
@@ -1179,7 +1187,7 @@ async function takePrefetch(key) {
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/shell.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
 <script>
-const LOOM_VERSION = "1.3.0";
+const LOOM_VERSION = "1.7.0";
 const $ = s => document.querySelector(s);
 const $msgs = $('#messages');
 const $input = $('#input');
@@ -2116,6 +2124,32 @@ function addTimeGap(text) {
   $msgs.appendChild(div);
 }
 
+// /api/history 里 from === "system"（或 type === "marker"）的条目：engine 写的
+// `[breath yielded to human]` 一类 Other moment。它不是人说的话，画成分隔线。
+function isHistoryMarker(m) {
+  return !!m && (m.from === 'system' || m.type === 'marker');
+}
+const BREATH_MARKER_LABELS = [
+  [/^\[breath yielded/i, '放下手头的事，转向你'],
+  [/^\[breath interrupted/i, '已停止'],
+  [/^\[breath superseded/i, '被新的对话取代'],
+];
+function breathMarkerLabel(text) {
+  const raw = (text || '').trim();
+  for (const [re, label] of BREATH_MARKER_LABELS) if (re.test(raw)) return label;
+  return raw.replace(/^\[|\]$/g, '');
+}
+function addBreathMarker(text, timestamp=null) {
+  const div = document.createElement('div');
+  div.className = 'breath-marker';
+  const ts = timestamp || formatTime();
+  div.textContent = `· ${breathMarkerLabel(text)} · ${ts} ·`;
+  $msgs.appendChild(div);
+  lastRole = 'system';   // 下一条消息重新带完整 meta，不和上一条并组
+  scrollToBottom();
+  return div;
+}
+
 function showThinkingIndicator() {
   removeThinkingIndicator();
   const div = document.createElement('div');
@@ -2605,6 +2639,8 @@ async function recoverViaHistory() {
   lastSendFailed = false;
   updateSendButton();
   scheduleFlushQueue();
+  // 顶掉我的流的如果是一条自主呼吸（人类流刚结束、beating 接上了），盯住它。
+  checkActiveStream({ autonomousOnly: true });
   return added;
 }
 
@@ -2777,9 +2813,14 @@ async function consumeChatStream(res, msg, filesToSend) {
             if (data.stream_id) {
               currentStreamId = data.stream_id;
               lastStreamId = data.stream_id;
-              syncHistoryCursor();   // 用户 moment 此时已落盘，推进游标避免对账时重复渲染
+              syncHistoryCursor();   // 用户 moment 此时已落盘，推进游标 + 写进场景缓存
             }
           }
+
+          // 同一条 SSE 上可能接着别的场景的 continuation（breathe_leftovers 用 meta 换
+          // scene_id）。不是本场景的：seq / 进度已经算过了，画面一个字都不画。
+          // meta / usage / error 不分场景。
+          if (eventType !== 'meta' && eventType !== 'usage' && eventType !== 'error' && !inMyScene(data)) continue;
 
           if (eventType === 'content_block_delta') {
             const text = data.delta?.text || '';
@@ -2886,6 +2927,7 @@ async function consumeChatStream(res, msg, filesToSend) {
               if (visibleText) streamEl.innerHTML = renderMarkdown(visibleText);
               else streamEl.parentElement.remove();
             }
+            const finishedReply = streamText;
             streamEl = null;
             streamText = '';
             if (data.session_id) sessionId = data.session_id;
@@ -2893,7 +2935,7 @@ async function consumeChatStream(res, msg, filesToSend) {
             tuiDone();
             clearTuiHint();
             lastSendFailed = false;
-            syncHistoryCursor();   // 推进游标，避免之后的增量对账重画这条回复
+            finalizeBeingReply(finishedReply);   // 登记 echo + 推进游标，避免之后的增量对账重画这条回复
           }
           
           if (eventType === 'error') {
@@ -2937,6 +2979,8 @@ async function consumeChatStream(res, msg, filesToSend) {
       }
       setStatus('connected');
       tuiDone();
+      // 这条尾巴没有 message_stop，之前从不推进游标——切网重连后 reconcile 就把它重画。
+      finalizeBeingReply(streamText);
     }
 
     // 走到这里我可能已经被 cutover 接管了（abort 和"字节流刚好读完"赛跑，
@@ -3020,7 +3064,7 @@ async function spliceSend(text) {
     res = await fetch(apiUrl('/api/chat/stream'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: spliceMsg, session_id: sessionId }),
+      body: JSON.stringify({ message: spliceMsg, session_id: sessionId, scene_id: `loom-${beingName}`, scene_meta: { client: `loom/${LOOM_VERSION}`, scene_label: 'Loom' } }),
     });
   } catch (e) {
     console.warn('splice send failed:', e);
@@ -3029,6 +3073,9 @@ async function spliceSend(text) {
   }
   if (res.status === 202) {
     addMessage('system', '✅ 消息已送达，being 会在思考间隙看到');
+    // 本地 isStreaming 为真：如果那条流其实已经死了（tab 休眠等），回复会落在
+    // 一条我看不见的呼吸里——追赶轮询兜底（isStreaming 仍真时它自己会让路）。
+    startCatchUpWatcher();
     return;
   }
   if (res.ok && res.body) {
@@ -3069,10 +3116,13 @@ async function send(text, filesOverride=null, sendOptions={}) {
   tuiSet('thinking');
   showThinkingIndicator();
   isStreaming = true;
+  stopAutonomousWatch();   // 人类流接管：自主呼吸 watcher 退场，live 通道自己会画
   updateSendButton();
 
   const body = { message: msg || `[Sent ${filesToSend.length} file(s)]` };
   if (sessionId) body.session_id = sessionId;
+  body.scene_id = `loom-${beingName}`;
+  body.scene_meta = { client: `loom/${LOOM_VERSION}`, scene_label: 'Loom' };
   if (filesToSend.length) {
     body.attachments = filesToSend.map(f => ({ media_type: f.type || 'application/octet-stream', data: f.base64 }));
   }
@@ -3125,6 +3175,8 @@ async function send(text, filesOverride=null, sendOptions={}) {
       setStatus('connected');
     }
     finalizeSendCleanup();
+    // P1：回复会在当前呼吸让路后落盘，不会推到这条连接上——去 /api/history 追。
+    startCatchUpWatcher();
     return;
   }
 
@@ -3189,8 +3241,8 @@ function handleStreamError(e, msg, filesToSend) {
       setStatus('error');
       lastSendFailed = true;
     } else if (userStoppedStream) {
-      // 用户手动停止：内容已在屏幕上，只需推进历史游标避免下次对账重复渲染
-      syncHistoryCursor();
+      // 用户手动停止：内容已在屏幕上，登记 echo + 推进历史游标避免下次对账重复渲染
+      finalizeBeingReply(streamText);
       setStatus('connected');
     }
     tuiClear();
@@ -3336,6 +3388,9 @@ function installLifecycleHooks() {
     if (document.visibilityState !== 'visible') { clearTimeout(healthTimer); return; }
     healthBackoff = 0;
     checkHealth({ force: true });
+    // P2：后台期间 being 可能自己呼吸过、或回答了我排队的消息——checkHealth 只在
+    // 连接状态跳变时对账，这里无条件补一次（节流在函数里）。
+    refreshOnRegainedAttention().catch(err => console.warn('refresh on visible failed:', err));
   });
   window.addEventListener('online', () => {
     healthBackoff = 0;
@@ -3349,6 +3404,7 @@ function installLifecycleHooks() {
   });
   window.addEventListener('focus', () => {
     if (connState !== 'online') checkHealth({ force: true });
+    refreshOnRegainedAttention().catch(err => console.warn('refresh on focus failed:', err));
   });
 }
 
@@ -3384,6 +3440,15 @@ async function stopCurrentTurn() {
   } catch (e) {
     console.warn('stop failed:', e);
   }
+  // P3：服务端在 stop 之后还会写 `[breath interrupted by human]`，排队的消息也
+  // 会在同一个 permit 下被回答（leftovers）——这些都不会再推到我已经关掉的连接上。
+  // 给引擎 1.5s 收尾，再对账一次。
+  setTimeout(() => {
+    if (isStreaming) return;
+    reconcileHistory()
+      .then(() => { if (!isStreaming) return checkActiveStream({ autonomousOnly: true }); })
+      .catch(err => console.warn('post-stop reconcile failed:', err));
+  }, 1500);
 }
 
 // ---- Soul card ----
@@ -3515,6 +3580,204 @@ function resetMessages() {
   scrollLock = true;
 }
 
+// ---- Scene cache (IndexedDB) ------------------------------------------------
+// Being 的记忆是整体的：/api/history 是 being 的完整时间线。这个房间发生过什么，
+// 由 Loom 自己记（docs/feat/loom-scene-idb.md）。IndexedDB `loom-{beingName}` 只存
+// 本场景的消息，keyPath 是 moment seq —— seq 全局递增、跨场景不重复，put 天然幂等。
+//
+// 它是缓存，不是真理源：清掉 = 下次从 being 重新拉。任何一步失败（隐私模式、
+// 配额、老浏览器、被别的 tab 卡住）都静默退回"每次从 /api/history 拉"的旧行为。
+// 所有 DB 操作都是 fire-and-forget 的异步写，不阻塞渲染和 SSE 流。
+const IDB_VERSION = 1;
+const IDB_OPEN_TIMEOUT_MS = 1500;        // open 被 onblocked 卡住 / 浏览器不响应：放弃，走网络
+const SCENE_CACHE_RENDER_LIMIT = 300;    // 首屏最多从缓存画这么多条；再多 DOM 和滚动都吃不消
+const SCENE_CACHE_PENDING_MAX = 200;     // DB ready 之前的写入批次先攒着，封顶防止无限增长
+
+let sceneResolved = false;     // /api/status 已经告诉我 being 叫什么——之前不开 DB、不过滤
+let sceneDB = null;            // IDBDatabase；null = 没开 / 开失败
+let sceneDBState = 'idle';     // idle | opening | ready | unavailable
+let sceneDBOpening = null;     // Promise<IDBDatabase|null>，initSceneCache 单飞
+// DB 里已经有一份"基线"（全量加载写过 / 从 DB 水化过）。基线之前的增量写入只攒着不落盘：
+// 否则 limit=5 游标同步会先写 5 条进去，下次刷新就只剩这 5 条 + 增量，更早的历史再也看不到。
+let sceneCacheSeeded = false;
+let sceneCachePending = [];    // [{ msgs, cursor }]，DB ready && seeded 之前的写入
+
+function mySceneId() { return sceneResolved && beingName ? `loom-${beingName}` : null; }
+// 唯一的场景过滤规则（历史、SSE 事件、replay 事件共用）：
+// 没有 scene_id 的是旧消息 / 自主呼吸，放行；有的必须是本场景。beingName 未知时不过滤。
+function inMyScene(m) {
+  const scene = mySceneId();
+  if (!scene) return true;
+  const sid = m && m.scene_id;
+  return !sid || sid === scene;
+}
+
+function idbRequest(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('indexeddb request failed'));
+  });
+}
+function idbTxDone(tx) {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('indexeddb tx failed'));
+    tx.onabort = () => reject(tx.error || new Error('indexeddb tx aborted'));
+  });
+}
+
+// 打开 / 初始化 `loom-{name}`。任何失败都 resolve(null)，绝不 reject。
+function openSceneDB(name) {
+  if (typeof indexedDB === 'undefined') return Promise.resolve(null);
+  return new Promise(resolve => {
+    let settled = false;
+    const done = db => { if (!settled) { settled = true; resolve(db); } };
+    const timer = setTimeout(() => done(null), IDB_OPEN_TIMEOUT_MS);
+    let req;
+    try { req = indexedDB.open(`loom-${name}`, IDB_VERSION); }
+    catch (_) { clearTimeout(timer); done(null); return; }   // Firefox 隐私模式在这里就抛
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('messages')) db.createObjectStore('messages', { keyPath: 'seq' });
+      if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
+    };
+    req.onsuccess = () => {
+      clearTimeout(timer);
+      const db = req.result;
+      if (settled) { try { db.close(); } catch (_) {} return; }   // 超时之后才开成功：别留悬空连接
+      // 别的 tab 要升级 schema：让路，本 tab 退回无缓存模式
+      db.onversionchange = () => {
+        try { db.close(); } catch (_) {}
+        if (sceneDB === db) { sceneDB = null; sceneDBState = 'unavailable'; sceneCachePending = []; }
+      };
+      done(db);
+    };
+    req.onerror = () => { clearTimeout(timer); done(null); };
+    req.onblocked = () => {};   // 交给 timer 兜底
+  });
+}
+
+// 写消息 + 推进 meta.lastSeq，**同一个事务**：不会出现"游标推过去了、消息却没落盘"
+// ——那会让下次 after=lastSeq 的增量永远跳过这几条。lastSeq 只前进不后退。
+async function idbPutMessages(db, msgs, cursor) {
+  const tx = db.transaction(['messages', 'meta'], 'readwrite');
+  const messages = tx.objectStore('messages');
+  for (const m of msgs) messages.put(m);
+  const cur = Number(cursor) || 0;
+  if (cur > 0) {
+    const metaStore = tx.objectStore('meta');
+    const req = metaStore.get('state');
+    req.onsuccess = () => {
+      const prev = req.result;
+      if (prev && (Number(prev.lastSeq) || 0) >= cur) return;
+      metaStore.put({
+        key: 'state',
+        beingName,
+        sceneId: mySceneId(),
+        lastSeq: cur,
+        updatedAt: new Date().toISOString(),
+      });
+    };
+  }
+  await idbTxDone(tx);
+}
+
+// 从尾部倒着取 limit 条再翻回正序（按 seq 升序）：几万条时不用全读进内存。
+function idbGetAllMessages(db, limit = Infinity) {
+  return new Promise((resolve, reject) => {
+    const out = [];
+    const req = db.transaction(['messages'], 'readonly').objectStore('messages').openCursor(null, 'prev');
+    req.onsuccess = () => {
+      const cur = req.result;
+      if (!cur || out.length >= limit) { resolve(out.reverse()); return; }
+      out.push(cur.value);
+      cur.continue();
+    };
+    req.onerror = () => reject(req.error || new Error('indexeddb cursor failed'));
+  });
+}
+
+async function idbGetMeta(db) {
+  const tx = db.transaction(['meta'], 'readonly');
+  return (await idbRequest(tx.objectStore('meta').get('state'))) || null;
+}
+
+// 只在 beingName 落地后调用（status 回来 / loadSceneCache）。单飞：重复调用拿同一个 promise。
+function initSceneCache() {
+  if (sceneDBState === 'opening') return sceneDBOpening;
+  if (sceneDBState !== 'idle') return Promise.resolve(sceneDB);   // ready → db；unavailable → null
+  if (!mySceneId()) return Promise.resolve(null);
+  sceneDBState = 'opening';
+  sceneDBOpening = openSceneDB(beingName)
+    .then(db => {
+      if (db) { sceneDB = db; sceneDBState = 'ready'; flushSceneCachePending(); }
+      else { sceneDBState = 'unavailable'; sceneCachePending = []; }
+      return db;
+    })
+    .catch(e => {
+      console.warn('scene cache unavailable:', e);
+      sceneDBState = 'unavailable';
+      sceneCachePending = [];
+      return null;
+    });
+  return sceneDBOpening;
+}
+
+// /api/history 的一条 → DB 的一行。只留 PRD 里的字段。
+function toSceneRow(m) {
+  const row = { seq: Number(m.seq), role: m.role, content: m.content, at: m.at };
+  if (m.from) row.from = m.from;
+  if (m.scene_id) row.scene_id = m.scene_id;
+  return row;
+}
+
+// 写入入口。所有路径（全量 / 增量对账、游标同步）都走这里；场景过滤在这里做一次，
+// 所以调用方传没过滤的也没关系。DB 没 ready 或还没有基线 → 攒着，之后 flush。
+function sceneCacheWrite(msgs, cursor) {
+  if (sceneDBState === 'unavailable') return;
+  if (sceneDBState !== 'ready' || !sceneCacheSeeded) {
+    if (sceneCachePending.length >= SCENE_CACHE_PENDING_MAX) sceneCachePending.shift();
+    sceneCachePending.push({ msgs: msgs || [], cursor: Number(cursor) || 0 });
+    return;
+  }
+  const rows = (msgs || [])
+    .filter(m => Number.isFinite(Number(m && m.seq)) && Number(m.seq) > 0)
+    .filter(inMyScene)
+    .map(toSceneRow);
+  const cur = Number(cursor) || 0;
+  if (!rows.length && !cur) return;
+  idbPutMessages(sceneDB, rows, cur).catch(e => console.warn('scene cache write failed:', e));
+}
+
+function flushSceneCachePending() {
+  if (sceneDBState !== 'ready' || !sceneCacheSeeded || !sceneCachePending.length) return;
+  const batches = sceneCachePending;
+  sceneCachePending = [];
+  for (const b of batches) sceneCacheWrite(b.msgs, b.cursor);
+}
+
+// 首屏：DB 里有本场景的历史就先画它。返回 { messages, lastSeq } 或 null（没开 / 空）。
+async function loadSceneCache() {
+  if (!mySceneId()) return null;
+  const db = sceneDB || (await initSceneCache());
+  if (!db) return null;
+  try {
+    const [meta, messages] = await Promise.all([
+      idbGetMeta(db),
+      idbGetAllMessages(db, SCENE_CACHE_RENDER_LIMIT),
+    ]);
+    if (!messages.length) return null;
+    const lastSeq = Math.max(
+      Number(meta && meta.lastSeq) || 0,
+      ...messages.map(m => Number(m.seq) || 0),
+    );
+    return { messages, lastSeq };
+  } catch (e) {
+    console.warn('scene cache read failed:', e);
+    return null;
+  }
+}
+
 // ---- History reconciliation (P1-5) ------------------------------------------
 // 旧的 loadHistory() 是破坏性的：每条恢复路径都 resetMessages() + 重渲染 100 条，
 // 滚动位置跳变、正在流的 streamEl 被抹掉、移动端每次切 tab 回来都闪一下。
@@ -3553,6 +3816,7 @@ function renderHistoryBatched(messages) {
       for (; i < end; i++) {
         const msg = messages[i];
         const ts = formatHistoryTime(msg.at);
+        if (isHistoryMarker(msg)) { addBreathMarker(msg.content, ts); continue; }
         addMessage(msg.role === 'user' ? 'user' : 'being', msg.content, false, ts, msg.at);
       }
       if (i < messages.length) {
@@ -3572,36 +3836,97 @@ function renderHistoryBatched(messages) {
   });
 }
 
+// 上一次 reconcileHistory 有没有新画出 being 的回复。202 追赶轮询用它判断
+// "回复到了没"——被打断标记和自己那条消息的回显都不算。
+let lastReconcileSawBeing = false;
+
 // 返回新追加的消息条数。full=true 才清屏（首次加载 / 服务端重启）。
-async function reconcileHistory({ full = false } = {}) {
+// 单飞：并发调用（追赶轮询 + 自主呼吸 watcher + 切 tab 回来）共用同一个 in-flight
+// promise，否则两个调用都用旧游标过滤，同一条消息会画两遍。
+let reconcileInFlight = null;
+function reconcileHistory(opts = {}) {
+  if (reconcileInFlight) return reconcileInFlight;
+  reconcileInFlight = reconcileHistoryOnce(opts).finally(() => { reconcileInFlight = null; });
+  return reconcileInFlight;
+}
+
+async function reconcileHistoryOnce({ full = false } = {}) {
+  lastReconcileSawBeing = false;
   try {
-    // 首次调用直接吃顶部预取的结果（已经在 CDN 下载期间跑完了）
+    // 首屏 / 服务端重启 / 游标还是 0：先看本地场景缓存。有就直接画（毫秒级，不等
+    // 网络），把游标推到缓存的 lastSeq，下面只向 being 要 after= 的增量。
+    // 缓存没开 / 空 / 读失败 → 走原来的全量路径。
+    let hydrated = false;
+    if (full || lastHistorySeq === 0) {
+      const cached = await loadSceneCache();
+      if (cached) {
+        resetMessages();
+        localEchoes = [];
+        await renderHistoryBatched(cached.messages);
+        lastHistorySeq = Math.max(lastHistorySeq, cached.lastSeq);
+        lastReconcileSawBeing = cached.messages.some(m => !isHistoryMarker(m) && m.role !== 'user');
+        sceneCacheSeeded = true;   // DB 里已经是一份基线，攒着的增量可以落盘了
+        flushSceneCachePending();
+        hydrated = true;
+      }
+    }
+
+    // 首次调用直接吃顶部预取的结果（已经在 CDN 下载期间跑完了）。预取的是不带
+    // after 的 limit=100，水化路径也能用：下面按 seq > 游标过滤，结果和 after= 等价。
+    // 增量对账带 ?after=<游标>：只要新的，服务端不支持时会忽略它，seq 过滤仍然兜底。
+    const incremental = hydrated || (!full && lastHistorySeq > 0);
+    const url = incremental
+      ? `/api/history?limit=100&after=${lastHistorySeq}`
+      : '/api/history?limit=100';
     const res = (await takePrefetch('history'))
-      || (await fetch(apiUrl('/api/history?limit=100'), { cache: 'no-store' }));
+      || (await fetch(apiUrl(url), { cache: 'no-store' }));
     if (!res.ok) return 0;
     const data = await res.json();
     const msgs = Array.isArray(data.messages) ? data.messages : [];
     let added = 0;
+    let toCache = [];   // 这次对账里属于本场景、要落进缓存的条目
 
-    if (full || lastHistorySeq === 0) {
+    if (!incremental) {
       resetMessages();
       localEchoes = [];
-      await renderHistoryBatched(msgs);
-      added = msgs.length;
+      const sceneMsgs = msgs.filter(inMyScene);
+      await renderHistoryBatched(sceneMsgs);
+      added = sceneMsgs.length;
+      // 用过滤后的 sceneMsgs 判断：别的场景里 being 的回复不算"我看到了回复"
+      lastReconcileSawBeing = sceneMsgs.some(m => !isHistoryMarker(m) && m.role !== 'user');
+      toCache = sceneMsgs;
     } else {
-      const fresh = msgs.filter(m => (Number(m.seq) || 0) > lastHistorySeq);
+      // 先等正在飞的游标推进落地，再用（可能已被推前的）lastHistorySeq 过滤。
+      // 上限 2s：游标同步自己有重试，不能让对账被它拖死；超时就按现状过滤，
+      // 剩下的靠 local echo 兜底。
+      if (cursorSyncInFlight) {
+        await Promise.race([
+          cursorSyncInFlight.catch(() => {}),
+          new Promise(r => setTimeout(r, 2000)),
+        ]);
+      }
+      const fresh = msgs.filter(m => (Number(m.seq) || 0) > lastHistorySeq)
+                        .filter(inMyScene);   // 场景自己维护
       for (const m of fresh) {
+        if (isHistoryMarker(m)) { addBreathMarker(m.content, formatHistoryTime(m.at)); added++; continue; }
         const role = m.role === 'user' ? 'user' : 'being';
-        if (consumeLocalEcho(role, m.content)) continue;   // 本地已经渲染过了
+        if (consumeLocalEcho(role, m.content)) continue;   // 本地已经渲染过了（但仍要进缓存）
         addMessage(role, m.content, false, formatHistoryTime(m.at), m.at);
+        if (role === 'being') lastReconcileSawBeing = true;
         added++;
       }
       if (added) scrollToBottom();
+      toCache = fresh;
     }
 
     if (msgs.length) {
       lastHistorySeq = Math.max(lastHistorySeq, ...msgs.map(m => Number(m.seq) || 0));
     }
+    // 全量 = 基线：先标 seeded 再写，之前攒着的增量随后 flush。增量 = 只写 fresh。
+    // 游标推到这次看到的最大 seq（含别的场景的：它们也"看过了"，下次不必再拉）。
+    if (!incremental) sceneCacheSeeded = true;
+    sceneCacheWrite(toCache, lastHistorySeq);
+    if (!incremental) flushSceneCachePending();
     return added;
   } catch (e) {
     console.warn('reconcileHistory failed:', e);
@@ -3609,20 +3934,210 @@ async function reconcileHistory({ full = false } = {}) {
   }
 }
 
-// live 流结束后调用：只推进游标，不渲染（内容已经在屏幕上了）
-async function syncHistoryCursor() {
-  try {
-    const res = await fetch(apiUrl('/api/history?limit=5'), { cache: 'no-store' });
-    if (!res.ok) return;
-    const data = await res.json();
-    const msgs = Array.isArray(data.messages) ? data.messages : [];
-    if (msgs.length) {
-      lastHistorySeq = Math.max(lastHistorySeq, ...msgs.map(m => Number(m.seq) || 0));
-    }
-  } catch (_) {}
+// ---- SBS state refresh (P1 / P5) --------------------------------------------
+// 202 = 消息入队，being 会在当前呼吸让路后用一条新呼吸回答。那条呼吸走的是
+// Collect sink，没有 SSE，也不会出现在我这条已经关掉的连接上——所以要自己去
+// /api/history 追。
+//
+// 不放弃：2s 起指数退避，单次间隔上限 30s，一直轮询到画出 being 的回复，或者
+// 到 5 分钟的绝对上限。之前是 2s / 4s / 8s 三次就停（共 14s）——leftover 呼吸
+// 一旦跑 portal_exec / 多轮 tool loop 就轻松超过 14s，watcher 已经放弃，人类
+// 永远看不到回复，只能重发，重发又是 202，循环。
+//
+// 占着 permit 的如果是自主呼吸（beating / callback），/api/stream/active 上能
+// 看到它，watchAutonomousStream 会在它结束时对账；但如果占着的是另一条 human
+// 流（别的 tab、或本 tab 已经死掉的 SSE）、或非流式 /api/chat 起的 leftover
+// （根本没注册 ActiveStream），这里的轮询就是唯一的通道。
+const CATCH_UP_INITIAL_MS = 2000;
+const CATCH_UP_MAX_INTERVAL_MS = 30000;
+const CATCH_UP_ABSOLUTE_MAX_MS = 5 * 60 * 1000;
+let catchUpTimer = null;
+
+function stopCatchUpWatcher() {
+  if (catchUpTimer) { clearTimeout(catchUpTimer); catchUpTimer = null; }
 }
 
-async function checkActiveStream() {
+// 纯函数，方便单测：给定上一次间隔，返回下一次间隔（指数退避，封顶）。
+function nextCatchUpDelay(prev) {
+  return Math.min(prev * 2, CATCH_UP_MAX_INTERVAL_MS);
+}
+
+function startCatchUpWatcher() {
+  stopCatchUpWatcher();
+  const startedAt = Date.now();
+  const deadline = startedAt + CATCH_UP_ABSOLUTE_MAX_MS;
+  let delay = CATCH_UP_INITIAL_MS;
+  const tick = async () => {
+    catchUpTimer = null;
+    // 本地已经在流了（202 后又发了一条拿到 200）→ 那条流会把一切画出来
+    if (isStreaming) return;
+    await reconcileHistory();
+    if (lastReconcileSawBeing) return;
+    // await 期间可能起了新流 / 又来了一次 202 重启 watcher——别在旧闭包里续命
+    if (isStreaming || catchUpTimer) return;
+    if (Date.now() >= deadline) {
+      console.warn(`catch-up watcher gave up after ${Math.round((Date.now() - startedAt) / 1000)}s without a being reply`);
+      return;
+    }
+    delay = nextCatchUpDelay(delay);
+    catchUpTimer = setTimeout(tick, delay);
+  };
+  catchUpTimer = setTimeout(tick, delay);
+  // 占着 Attention 的很可能是一条自主呼吸：盯住它，结束时对账一次。
+  checkActiveStream({ autonomousOnly: true });
+}
+
+// 自主呼吸（beating / callback / leftover）在 /api/stream/active 上有 stream_id
+// 和 origin，但没有事件（Collect sink）。不能走 replayStream —— 那会把
+// isStreaming 置 true、挂 thinking 气泡、结束时只推游标不渲染，回复永远画不出来。
+// 这里只轻量轮询 finished，结束后 reconcileHistory 把落盘的内容拉进来。
+const AUTONOMOUS_ORIGIN_LABELS = {
+  beating: 'being 正在自己想事情…',
+  callback: 'being 正在处理一条回调…',
+  leftover: 'being 正在回答排队的消息…',
+};
+let autonomousWatch = null;   // { streamId, timer }
+
+function stopAutonomousWatch() {
+  if (!autonomousWatch) return;
+  if (autonomousWatch.timer) clearTimeout(autonomousWatch.timer);
+  autonomousWatch = null;
+  clearTuiHint();
+}
+
+function watchAutonomousStream(data) {
+  if (isStreaming) return;
+  const streamId = data.stream_id;
+  if (!streamId) return;
+  if (autonomousWatch && autonomousWatch.streamId === streamId) return;   // 已经在盯
+  stopAutonomousWatch();
+  const watch = { streamId, timer: null };
+  autonomousWatch = watch;
+  let interval = 2000;
+  const deadline = Date.now() + POLL_ABSOLUTE_MAX_MS;
+  setStatus('thinking');
+  setTuiHint(AUTONOMOUS_ORIGIN_LABELS[data.origin] || 'being 正在呼吸…');
+
+  const release = () => {
+    if (autonomousWatch !== watch) return false;
+    autonomousWatch = null;
+    clearTuiHint();
+    if (!isStreaming) setStatus('connected');
+    return true;
+  };
+  const finish = async () => {
+    if (!release()) return;
+    await reconcileHistory();
+    // 这次对账已经画出 being 的回复 → 202 追赶轮询没必要再跑到 5 分钟上限
+    if (lastReconcileSawBeing) stopCatchUpWatcher();
+  };
+  const poll = async () => {
+    watch.timer = null;
+    if (autonomousWatch !== watch) return;
+    if (isStreaming) { release(); return; }   // 人类流接管了，live 通道自己会画
+    if (Date.now() > deadline) { await finish(); return; }
+    try {
+      const r = await fetch(apiUrl('/api/stream/active'), {
+        cache: 'no-store',
+        signal: timeoutSignal(8000),
+      });
+      if (r.status === 204) { await finish(); return; }
+      if (r.ok) {
+        const d = await r.json();
+        if (d.stream_id !== streamId) {
+          await finish();
+          if (d.origin && d.origin !== 'human' && !d.finished) watchAutonomousStream(d);
+          return;
+        }
+        if (d.finished) { await finish(); return; }
+      }
+    } catch (e) {
+      console.warn('autonomous stream watch failed:', e);
+    }
+    interval = Math.min(interval * 1.5, 5000);
+    if (autonomousWatch === watch) watch.timer = setTimeout(poll, interval);
+  };
+  watch.timer = setTimeout(poll, interval);
+}
+
+// P2/P3：切回前台 / 重新聚焦 / 按下停止之后，把落盘但没画出来的内容拉回来。
+// focus 和 visibilitychange 往往一起触发，节流一下。
+let lastRefreshAt = 0;
+async function refreshOnRegainedAttention() {
+  if (isStreaming) return;
+  // 断线恢复在途：连接状态机重连后会 probe + cutover/replay，这里不能抢着
+  // 走 reconcile + replayStream，否则同一条流被两条路径各画一遍。
+  if (pendingRecovery) return;
+  const now = Date.now();
+  if (now - lastRefreshAt < 1500) return;
+  lastRefreshAt = now;
+  // 增量对账（after=游标）：后台期间落盘的本场景消息在 reconcileHistoryOnce 里
+  // 过滤 scene → 写场景缓存 → 追加渲染，别的场景的只推游标不画。
+  await reconcileHistory();
+  if (!isStreaming) await checkActiveStream();
+}
+
+// live 流结束后调用：只推进游标，不渲染（内容已经在屏幕上了）
+//
+// 串行化：把 in-flight promise 存在 cursorSyncInFlight 里，reconcileHistoryOnce
+// 在过滤 fresh 之前先等它。否则游标推进和对账之间有一个 race 窗口——移动端
+// 双 SIM / 频繁切网时 fetch 慢一拍，reconcile 拿旧游标把刚流完的回复又画一遍。
+// 带 8s 超时防 SIM 切换时 fetch 挂死；失败重试 2 次（500ms / 1000ms）。
+let cursorSyncInFlight = null;
+function syncHistoryCursor() {
+  const p = syncHistoryCursorOnce().finally(() => {
+    if (cursorSyncInFlight === p) cursorSyncInFlight = null;
+  });
+  cursorSyncInFlight = p;
+  return p;
+}
+
+async function syncHistoryCursorOnce() {
+  const delays = [0, 500, 1000];
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt]) await new Promise(r => setTimeout(r, delays[attempt]));
+    try {
+      // 有游标就只要 after= 的增量：正好是刚落盘的这一轮（用户消息 / being 回复），
+      // 带着它们的 seq 一起写进场景缓存——live / replay 通道上的消息没有 seq，
+      // 这里是它们进 DB 的唯一入口。没游标（首屏对账没成功）退回旧的 limit=5。
+      const url = lastHistorySeq > 0
+        ? `/api/history?limit=100&after=${lastHistorySeq}`
+        : '/api/history?limit=5';
+      const res = await fetch(apiUrl(url), {
+        cache: 'no-store',
+        signal: timeoutSignal(8000),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const msgs = Array.isArray(data.messages) ? data.messages : [];
+      if (msgs.length) {
+        const fresh = msgs.filter(m => (Number(m.seq) || 0) > lastHistorySeq);
+        lastHistorySeq = Math.max(lastHistorySeq, ...msgs.map(m => Number(m.seq) || 0));
+        // 这些消息已经被游标盖住、不会再进 reconcile 了，把对应的 local echo 消费掉，
+        // 免得残留的 echo 之后误吞一条内容相同的新消息。
+        for (const m of msgs) {
+          if (isHistoryMarker(m)) continue;
+          consumeLocalEcho(m.role === 'user' ? 'user' : 'being', m.content);
+        }
+        sceneCacheWrite(fresh, lastHistorySeq);   // 场景过滤在里面做
+      }
+      return;
+    } catch (_) {
+      // 网络抖动 / 超时：进下一轮重试
+    }
+  }
+}
+
+// being 回复的统一定稿入口：先登记 local echo（万一游标没来得及推进，
+// reconcile 也能靠 echo 认出这条已经画过），再推进游标。
+function finalizeBeingReply(text) {
+  noteLocalEcho('being', text);
+  syncHistoryCursor();
+}
+
+// autonomousOnly=true：只接手自主呼吸，不 replay 别的 tab 起的人类流
+// （recoverViaHistory 之后的补查用——那条路本来就选择"对账而不是 replay"）。
+async function checkActiveStream({ autonomousOnly = false } = {}) {
   try {
     const res = (await takePrefetch('active'))
       || (await fetch(apiUrl('/api/stream/active'), {
@@ -3630,7 +4145,17 @@ async function checkActiveStream() {
         signal: timeoutSignal(8000),
       }));
     if (!res || res.status === 204 || !res.ok) return;
-    replayStream(await res.json());
+    const data = await res.json();
+    // P5：origin 不是 human 的是 being 自己起的呼吸（beating / callback），
+    // 不是"别的 tab 抢走了流"。没有本地流在跑就盯住它，结束时对账。
+    if (data.origin && data.origin !== 'human') {
+      if (isStreaming) return;
+      if (data.finished) { reconcileHistory(); return; }
+      watchAutonomousStream(data);
+      return;
+    }
+    if (autonomousOnly) return;
+    replayStream(data);
   } catch (e) {
     console.warn('checkActiveStream failed:', e);
   }
@@ -3646,6 +4171,7 @@ function replayStream(data) {
   }
 
   isStreaming = true;
+  stopAutonomousWatch();
   currentStreamId = data.stream_id || null;
   if (currentStreamId) lastStreamId = currentStreamId;
   writerEpoch++;   // F2: 接管写权
@@ -3660,6 +4186,9 @@ function replayStream(data) {
   const events = Array.isArray(data.events) ? data.events : [];
   for (const item of events) {
     const eventData = item.data || {};
+    // 每个事件都带 scene_id（null = 未寻址）。别的场景的 continuation 不画；
+    // 它落盘后的内容也不进这个房间的缓存——那是别的房间的事。
+    if (!inMyScene(eventData)) continue;
     switch (item.event) {
       case 'content_block_delta':
         streamText += eventData.delta?.text || '';
@@ -3830,6 +4359,9 @@ function pollActiveStream(streamId, lastSeq) {
 
 function processReplayEvent(eventType, eventData) {
   markProgress(eventType, eventData);
+  // 别的场景的事件：进度照算（服务端确实在推进，watchdog 不该误判 stalled），
+  // 画面不画。error 例外——它结束整条流，和场景无关。
+  if (eventType !== 'error' && !inMyScene(eventData)) return;
   switch (eventType) {
     case 'content_block_delta': {
       const text = eventData.delta?.text || '';
@@ -3935,6 +4467,7 @@ function processReplayEvent(eventType, eventData) {
 function finalizeReplayReply() {
   if (renderTimer) { cancelAnimationFrame(renderTimer); renderTimer = null; }
   solidifyReplayBubble();
+  const finishedReply = streamText;
   streamEl = null;
   streamText = '';
   removeThinkingIndicator();
@@ -3942,7 +4475,7 @@ function finalizeReplayReply() {
   tuiDone();
   clearTuiHint();
   lastSendFailed = false;
-  syncHistoryCursor();
+  finalizeBeingReply(finishedReply);
 }
 
 function solidifyReplayBubble() {
@@ -3960,6 +4493,7 @@ function finalizeReplayStream() {
   // 先把 streamText 固化为正式消息（如果还没渲染）
   solidifyReplayBubble();
 
+  const finishedReply = streamText;
   isStreaming = false;
   if (currentStreamId) lastStreamId = currentStreamId;
   currentStreamId = null;
@@ -3972,9 +4506,9 @@ function finalizeReplayStream() {
   removeThinkingIndicator();
   lastSendFailed = false;
   updateSendButton();
-  // 不做历史渲染 — 内容已经在屏幕上了，只推进游标，
+  // 不做历史渲染 — 内容已经在屏幕上了，登记 echo + 推进游标，
   // 这样之后的增量对账不会把刚流出来的回复再画一遍
-  syncHistoryCursor();
+  finalizeBeingReply(finishedReply);
   scheduleFlushQueue();
 }
 
@@ -4029,7 +4563,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.visualViewport.addEventListener('scroll', updateViewportHeight);
   }
   
-  (async () => {
+  const statusReady = (async () => {
     const res = (await takePrefetch('status')) || (await fetch(apiUrl('/api/status')));
     return res.json();
   })()
@@ -4040,6 +4574,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         $name.textContent = beingName;
         document.title = 'Loom · ' + beingName;
         updatePlaceholder();
+        // being 叫什么现在才算确定：场景 id 和场景缓存都挂在这个名字上。
+        sceneResolved = true;
+        initSceneCache();
       }
       updateSoulCard({
         ...data,
@@ -4050,9 +4587,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         status: data.status || 'connected'
       });
     })
-    .catch(() => {});
+    .catch(() => {})
+    .finally(() => {
+      // status 挂了 / 没给名字：这次会话永远不知道 being 叫什么 → 不开 DB、不过滤，
+      // 攒着的写入也没有去处，放掉。
+      if (!sceneResolved && sceneDBState === 'idle') { sceneDBState = 'unavailable'; sceneCachePending = []; }
+    });
 
-  // 全量渲染历史，等**渲染真正完成**再检查活跃流。
+  // 场景过滤和场景缓存都要先知道 being 叫什么。status 是预取的，通常几十 ms 就到；
+  // 拖太久就先不带场景上（不过滤、不开 DB），它晚到时缓存再开，之前的写入攒着 flush。
+  await Promise.race([statusReady, new Promise(r => setTimeout(r, 2500))]);
+
+  // 全量渲染历史，等**渲染真正完成**再检查活跃流。有场景缓存时先从缓存画，再拉增量。
   // （旧实现里 loadHistory 启动 rAF 批渲染就 return 了，100 条历史要 10 帧 ≈ 160ms，
   //   checkActiveStream 的 replay 消息会插进历史消息中间——本地部署稳定复现。）
   await reconcileHistory({ full: true });

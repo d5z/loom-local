@@ -1452,7 +1452,11 @@ function llmSelectCustom() {
   document.getElementById('s2-base-url').value = '';
   document.getElementById('s2-base-url').removeAttribute('readonly');
   document.getElementById('s2-api-key').value = '';
-  document.getElementById('s2-key-hint').textContent = 'Enter provider details for custom model.';
+  // Gateways (PPIO, OpenRouter) address models by their full namespaced id —
+  // paste it verbatim together with the Base URL; leave Provider blank and the
+  // backend derives the wire protocol from the endpoint.
+  document.getElementById('s2-key-hint').textContent =
+    'Provider/Base URL optional. For a gateway, set Base URL and paste the full model id (e.g. deepseek/deepseek-v3).';
   document.getElementById('s2-key-hint').style.color = 'var(--text-muted)';
   document.getElementById('s2-error').textContent = '';
   document.getElementById('llm-step1').style.display = 'none';
@@ -1510,12 +1514,15 @@ async function llmApply() {
 }
 
 function inferBaseUrl(provider) {
+  // Keep in sync with LlmConfig::CANONICAL_URLS (crates/organ/primitive/src/llm_config.rs).
   const map = {
     'anthropic': 'https://api.anthropic.com',
+    'openai': 'https://api.openai.com/v1',
     'openai-responses': 'https://api.openai.com/v1',
     'deepseek': 'https://api.deepseek.com',
     'kimi': 'https://api.moonshot.cn/v1',
     'google': 'https://generativelanguage.googleapis.com',
+    'glm': 'https://open.bigmodel.cn/api/paas/v4',
     'self-hosted': 'http://115.190.110.33:7860/v1',
   };
   return map[provider] || '';

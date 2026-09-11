@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="loom-version" content="1.7.0">
+<meta name="loom-version" content="1.8.0">
 <title>Loom</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
@@ -1187,7 +1187,7 @@ async function takePrefetch(key) {
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/shell.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
 <script>
-const LOOM_VERSION = "1.7.0";
+const LOOM_VERSION = "1.8.0";
 const $ = s => document.querySelector(s);
 const $msgs = $('#messages');
 const $input = $('#input');
@@ -1330,14 +1330,27 @@ function renderLlmStep1(model, presets) {
   // Preset list grouped by provider (exclude current)
   const listEl = document.getElementById('llm-preset-list');
   const others = _presets.filter(p => p.model !== _currentModel);
-  const providerNames = { 'anthropic': 'Claude', 'openai-responses': 'OpenAI', 'deepseek': 'DeepSeek', 'kimi': 'Kimi', 'google': 'Google', 'glm': 'GLM' };
+  const providerNames = { 'anthropic': 'Claude', 'openai-responses': 'OpenAI', 'deepseek': 'DeepSeek', 'kimi': 'Kimi', 'google': 'Google', 'glm': 'GLM', 'self-hosted': '自部署' };
+  // Separate self-hosted presets from others
+  const selfHosted = others.filter(p => p.provider === 'self-hosted');
+  const rest = others.filter(p => p.provider !== 'self-hosted');
   const groups = {};
-  for (const p of others) {
+  for (const p of rest) {
     const g = p.provider || 'other';
     if (!groups[g]) groups[g] = [];
     groups[g].push(p);
   }
   let html = '';
+  // Self-hosted section first (no key needed, one-click switch)
+  if (selfHosted.length > 0) {
+    html += `<div class="provider-group-label">自部署</div><div class="provider-items">`;
+    html += selfHosted.map(p => `
+      <div class="llm-item" onclick="llmSelectSelfHosted('${escAttr(p.id)}')">
+        ${escHtml(p.label)}
+      </div>
+    `).join('');
+    html += `</div>`;
+  }
   for (const [provider, items] of Object.entries(groups)) {
     const name = providerNames[provider] || provider;
     html += `<div class="provider-group-label">${escHtml(name)}</div><div class="provider-items">`;
@@ -1354,6 +1367,23 @@ function renderLlmStep1(model, presets) {
   // Show step 1, hide step 2
   document.getElementById('llm-step1').style.display = '';
   document.getElementById('llm-step2').style.display = 'none';
+}
+
+async function llmSelectSelfHosted(presetId) {
+  const preset = _presets.find(p => p.id === presetId);
+  if (!preset) return;
+  // Self-hosted: skip step 2, apply directly (no key needed)
+  const patch = {
+    model: preset.model,
+    provider: preset.provider,
+    base_url: inferBaseUrl(preset.provider),
+  };
+  try {
+    await applyConfigChange(patch);
+    renderLlmStep1(preset.model, _presets);
+  } catch (e) {
+    console.error('Self-hosted switch failed:', e);
+  }
 }
 
 function llmSelect(presetId) {
@@ -1486,6 +1516,7 @@ function inferBaseUrl(provider) {
     'deepseek': 'https://api.deepseek.com',
     'kimi': 'https://api.moonshot.cn/v1',
     'google': 'https://generativelanguage.googleapis.com',
+    'self-hosted': 'http://115.190.110.33:7860/v1',
   };
   return map[provider] || '';
 }

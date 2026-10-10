@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="loom-version" content="1.8.2">
+<meta name="loom-version" content="1.9.1">
 <title>Loom</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -329,9 +329,6 @@ html, body {
   transition: opacity 0.2s;
 }
 .model-input-row button:hover { opacity: 0.85; }
-.slider-row { display: flex; align-items: center; gap: 10px; }
-.slider-row input[type=range] { flex: 1; accent-color: var(--accent); }
-.slider-row span { color: var(--text-dim); min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
 .settings-advanced { margin-top: 4px; }
 .settings-advanced summary {
   color: var(--text-dim); cursor: pointer; font-size: 13px;
@@ -344,49 +341,113 @@ html, body {
   font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
   color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase;
 }
+.llm-view { animation: llmViewIn 0.15s ease-out; }
+@keyframes llmViewIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .llm-current {
-  padding: 10px 12px; border-radius: 10px;
+  padding: var(--space-md); border-radius: var(--radius-md);
   background: var(--accent-tint); border: 1px solid var(--accent-border);
-  margin-bottom: 10px; font-size: 14px;
+  margin-bottom: var(--space-sm);
 }
-.llm-current .model-name { font-weight: 600; color: var(--text); }
-.llm-current .model-detail { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-.llm-list { display: flex; flex-direction: column; gap: 2px; }
-.provider-group-label {
-  font-size: 10px; font-weight: 600; color: var(--text-muted);
-  letter-spacing: 0.05em; padding: 8px 0 3px; margin-top: 2px; text-transform: uppercase;
+.llm-current-head { display: flex; align-items: center; gap: var(--space-sm); }
+.llm-current-name {
+  flex: 1; min-width: 0; font-size: var(--font-md); font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.provider-group-label:first-child { padding-top: 0; margin-top: 0; }
-.llm-custom-link {
-  font-size: 12px; color: var(--text-muted); cursor: pointer;
-  padding: 8px 0 0; opacity: 0.6; transition: opacity 0.2s;
+.llm-current-route {
+  font-family: var(--mono); font-size: var(--font-xs); color: var(--text-dim);
+  margin-top: var(--space-xs); user-select: all; word-break: break-all;
 }
-.llm-custom-link:hover { opacity: 1; }
-.provider-items { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
-.llm-item {
-  padding: 6px 8px; border-radius: 6px; cursor: pointer;
-  font-size: 12px; color: var(--text-dim);
-  transition: background 0.2s, color 0.2s;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.llm-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex: none; transition: background 0.15s; }
+.llm-dot.ok { background: var(--green); }
+.llm-dot.warn { background: var(--yellow); }
+.llm-dot.bad { background: var(--red); }
+.llm-dot.flash { animation: llmDotFlash 0.6s ease-out; }
+@keyframes llmDotFlash { 0% { opacity: 0.2; transform: scale(1.6); } 100% { opacity: 1; transform: none; } }
+.llm-chips { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin-top: var(--space-sm); }
+.llm-chips:empty { display: none; }
+.llm-chip {
+  font-size: 11px; color: var(--text-dim); background: var(--bg-softer);
+  border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 2px 6px;
 }
-.llm-item:hover { background: var(--hover-overlay); color: var(--text); }
-.llm-item .badge { font-size: 10px; opacity: 0.5; }
-.llm-custom-row {
-  display: flex; gap: 6px; margin-top: 8px; padding-top: 8px;
-  border-top: 1px solid var(--border);
+.llm-chip.unverified { color: var(--text-muted); border-style: dashed; }
+.llm-route-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.llm-route {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-softer);
+  color: var(--text-dim); cursor: pointer; font-size: var(--font-sm); font-family: inherit;
+  transition: var(--transition-full); white-space: nowrap;
 }
-.llm-custom-row input { flex:1; background:var(--bg-softer); border:1px solid var(--border); border-radius:8px; padding:8px 10px; color:var(--text); font-size:13px; }
+.llm-route:hover { color: var(--text); }
+.llm-route.active { color: var(--accent); background: var(--accent-tint); border-color: var(--accent-border); }
+.llm-route .llm-dot { width: 6px; height: 6px; }
+.llm-key-card {
+  margin: 0 16px var(--space-md); padding: var(--space-md); border-radius: var(--radius-md);
+  background: var(--bg-soft); border: 1px solid var(--yellow);
+}
+.llm-key-title { font-size: var(--font-sm); color: var(--text); margin-bottom: var(--space-sm); }
+.llm-key-row { display: flex; gap: 6px; }
+.llm-key-row input { flex: 1; min-width: 0; }
+.llm-key-row .btn-sm { white-space: nowrap; }
+.llm-model-list { display: flex; flex-direction: column; gap: 2px; margin-top: var(--space-sm); max-height: 50vh; overflow-y: auto; }
+.llm-model-group {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em; color: var(--text-muted);
+  text-transform: uppercase; padding: 10px 0 4px;
+}
+.llm-model-row {
+  padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; min-height: 36px;
+  border: 1px solid transparent; transition: var(--transition-full); box-sizing: border-box;
+}
+.llm-model-row:hover, .llm-model-row.focused { background: var(--hover-overlay); }
+.llm-model-row.selected { background: var(--accent-tint); border-color: var(--accent-border); }
+.llm-model-row.unverified { opacity: 0.7; }
+.llm-model-line1 { display: flex; align-items: center; gap: var(--space-sm); }
+.llm-model-name { flex: 1; min-width: 0; font-size: var(--font-sm); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.llm-model-caps { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.llm-model-line2 {
+  display: flex; justify-content: space-between; gap: var(--space-sm);
+  font-family: var(--mono); font-size: 11px; color: var(--text-muted); margin-top: 2px;
+}
+.llm-model-line2 .id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.llm-model-line2 .when { flex: none; }
+.llm-skeleton { height: 36px; border-radius: var(--radius-sm); background: var(--surface-tint); animation: llmSkeleton 1.2s ease-in-out infinite; margin-bottom: 4px; }
+@keyframes llmSkeleton { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+.llm-empty { padding: var(--space-md) 0; color: var(--text-dim); font-size: var(--font-xs); line-height: 1.5; }
+.llm-empty a { color: var(--accent); }
+.llm-confirm {
+  margin: 6px 0 2px; padding: var(--space-md); border-radius: var(--radius-md);
+  background: var(--bg-soft); border: 1px solid var(--accent-border);
+  animation: llmViewIn 0.15s ease-out;
+}
+.llm-confirm.failed { border-color: var(--red); }
+.llm-confirm-text { font-size: var(--font-sm); color: var(--text); margin-bottom: var(--space-sm); }
+.llm-confirm .btn-apply { width: 100%; margin: 0; padding: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.llm-spin {
+  width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: var(--text); animation: llmSpin 0.8s linear infinite;
+}
+@keyframes llmSpin { to { transform: rotate(360deg); } }
+.llm-confirm-error { color: var(--red); font-size: var(--font-xs); margin-top: var(--space-sm); line-height: 1.5; }
+.llm-confirm-error:empty { display: none; }
+.llm-candidates { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: var(--space-sm); }
+.llm-candidates:empty { display: none; }
+.llm-candidate {
+  font-family: var(--mono); font-size: 11px; padding: 4px 8px; min-height: 28px;
+  border-radius: var(--radius-xs); border: 1px solid var(--border); background: var(--bg-softer);
+  color: var(--text-dim); cursor: pointer; transition: var(--transition-full);
+}
+.llm-candidate:hover { color: var(--accent); border-color: var(--accent-border); }
+#llm-tech-details { margin-top: var(--space-sm); font-size: 11px; color: var(--text-muted); }
+#llm-tech-details summary { cursor: pointer; }
+#llm-tech-details pre { font-family: var(--mono); font-size: 11px; white-space: pre-wrap; word-break: break-all; margin: 4px 0 0; color: var(--text-dim); }
 .btn-sm { background:var(--bg-softer); border:1px solid var(--border); border-radius:8px; padding:6px 12px; color:var(--text); cursor:pointer; font-size:13px; }
 .btn-sm:hover { background:var(--hover-overlay); }
-.btn-rollback { width:100%; background:none; border:1px solid var(--border); border-radius:8px; padding:10px; color:var(--text-muted); cursor:pointer; font-size:13px; transition: color 0.2s; }
-.btn-rollback:hover { color:var(--text); }
-.step2-header { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); font-weight:600; }
+.llm-back { background:none; border:none; padding:0; color:var(--text-muted); font-size:var(--font-sm); font-family:inherit; cursor:pointer; transition: var(--transition-full); }
+.llm-back:hover { color:var(--text); }
 .step2-back { cursor:pointer; font-size:18px; color:var(--text-muted); padding:4px 8px; border-radius:6px; }
 .step2-back:hover { color:var(--text); background:var(--hover-overlay); }
 .field-label { font-size:12px; color:var(--text-muted); margin-bottom:4px; display:block; }
 .field-input { width:100%; background:var(--bg-softer); border:1px solid var(--border); border-radius:8px; padding:9px 12px; color:var(--text); font-size:13px; box-sizing:border-box; }
 .field-input:focus { border-color:var(--accent); outline:none; }
-.step2-error { color:var(--red); font-size:13px; padding:0 16px; min-height:20px; }
 .btn-apply { width:calc(100% - 32px); margin:8px 16px 16px; padding:12px; background:var(--accent); color:var(--text); border:none; border-radius:var(--radius-md); font-size:14px; font-weight:600; cursor:pointer; transition: opacity 0.2s; }
 .btn-apply:hover { opacity:0.9; }
 .btn-apply:disabled { opacity:0.4; cursor:default; }
@@ -396,8 +457,9 @@ html, body {
 .toggle-group { display: flex; gap: 6px; }
 .toggle-group button {
   flex: 1; background: var(--bg-softer); color: var(--text-dim);
-  border: 1px solid var(--border); border-radius: 8px;
-  padding: 8px 6px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  min-height: 36px; padding: 0 6px; cursor: pointer;
+  font-size: var(--font-sm); font-family: inherit;
   transition: var(--transition-full);
 }
 .toggle-group button:hover { color: var(--text); }
@@ -904,9 +966,18 @@ html, body {
   .btn-attach { width: 44px; min-width: 44px; }
   #soul-card .card { padding: 30px 18px 24px; }
   #soul-stats { grid-template-columns: 1fr; }
-  .llm-item { min-height: var(--touch-target); display: flex; align-items: center; }
   .toggle-group button { min-height: var(--touch-target); }
   .step2-back { min-width: var(--touch-target); min-height: var(--touch-target); display: flex; align-items: center; justify-content: center; }
+}
+/* Narrow screens (phone Loom, PRD llm-catalog §2.6): routes scroll in one row,
+   list goes full width, the confirm strip sticks to the bottom. */
+@media (max-width: 420px) {
+  .llm-route-list { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; scrollbar-width: none; }
+  .llm-route-list::-webkit-scrollbar { display: none; }
+  .llm-route { flex: none; }
+  .llm-model-list { max-height: none; }
+  .llm-model-line2 { flex-wrap: wrap; }
+  .llm-confirm { position: sticky; bottom: 0; z-index: 1; }
 }
 </style>
 </head>
@@ -1042,16 +1113,22 @@ html, body {
     <button class="btn-close" onclick="toggleSettings()">✕</button>
   </div>
     <div class="settings-body">
-    <!-- Step 1: Model list + settings -->
-    <div id="llm-step1">
+    <!-- Overview: current model card + thinking -->
+    <div id="llm-overview" class="llm-view">
       <div class="settings-section">
-        <div class="section-label">MODEL</div>
-        <div id="llm-current" class="llm-current"></div>
-        <div id="llm-preset-list" class="llm-list"></div>
-        <div class="llm-custom-link" onclick="llmSelectCustom()">Custom model ›</div>
+        <div class="section-label">模型</div>
+        <div id="llm-current-card" class="llm-current">
+          <div class="llm-current-head">
+            <span id="llm-current-dot" class="llm-dot" aria-hidden="true"></span>
+            <span id="llm-current-name" class="llm-current-name"></span>
+            <button id="llm-change-btn" type="button" class="btn-sm" onclick="openLlmPicker()">更换</button>
+          </div>
+          <div id="llm-current-route" class="llm-current-route" title="线路 · 模型 id"></div>
+          <div id="llm-current-chips" class="llm-chips"></div>
+        </div>
       </div>
       <div class="settings-section">
-        <div class="section-label">THINKING</div>
+        <div class="section-label">思考深度</div>
         <div class="toggle-group" id="cfg-thinking">
           <button data-val="off" onclick="applyConfigChange({thinking:'off'})">Off</button>
           <button data-val="low" onclick="applyConfigChange({thinking:'low'})">Low</button>
@@ -1059,49 +1136,56 @@ html, body {
           <button data-val="high" onclick="applyConfigChange({thinking:'high'})">High</button>
         </div>
       </div>
-      <div class="settings-section">
-        <div class="section-label">TEMPERATURE</div>
-        <div class="slider-row">
-          <input type="range" id="cfg-temperature" min="0" max="1" step="0.1" value="1">
-          <span id="cfg-temperature-val">1.0</span>
-        </div>
-      </div>
-      <div class="settings-section" style="padding-top:4px">
-        <button class="btn-rollback" onclick="rollbackLlm()">↩ Rollback to last working</button>
-      </div>
     </div>
 
-    <!-- Step 2: Confirm switch -->
-    <div id="llm-step2" style="display:none">
-      <div class="step2-header">
-        <span class="step2-back" onclick="llmBack()">←</span>
-        <span id="step2-title">Switch to…</span>
+    <!-- Picker: route → (key) → model → inline confirm (PRD llm-catalog §2.6) -->
+    <div id="llm-picker" class="llm-view" style="display:none" tabindex="-1">
+      <div class="settings-section" style="padding-bottom:0">
+        <button type="button" class="llm-back" aria-label="返回" onclick="closeLlmPicker()">← 模型</button>
       </div>
-      <div class="settings-section" id="s2-model-section" style="display:none">
-        <label class="field-label">Model</label>
-        <input id="s2-model" type="text" class="field-input" placeholder="e.g. gpt-5.6-sol">
+      <div class="settings-section" style="padding-bottom:6px">
+        <div class="section-label">线路</div>
+        <div id="llm-route-list" class="llm-route-list" role="tablist"></div>
       </div>
-      <div class="settings-section" id="s2-route-section">
-        <div class="toggle-group" id="s2-route">
-          <button data-val="official" class="active" onclick="setRoute('official')">Official</button>
-          <button data-val="openrouter" onclick="setRoute('openrouter')">OpenRouter</button>
+      <div id="llm-key-card" class="llm-key-card" style="display:none" hidden>
+        <div id="llm-key-title" class="llm-key-title">这条线路还没有 key</div>
+        <div class="llm-key-row">
+          <input id="llm-key-input" type="password" class="field-input" placeholder="sk-…" autocomplete="off" spellcheck="false">
+          <button id="llm-key-save" type="button" class="btn-sm" onclick="saveRouteKey()">保存并加载模型</button>
+        </div>
+        <div id="llm-key-hint" class="hint" style="margin-top:6px"></div>
+      </div>
+      <div id="llm-custom-form" class="settings-section" style="display:none">
+        <label class="field-label" for="llm-custom-base-url">Base URL</label>
+        <input id="llm-custom-base-url" type="url" class="field-input" placeholder="https://…/v1" autocomplete="off" spellcheck="false">
+        <label class="field-label" for="llm-custom-model" style="margin-top:8px">Model id</label>
+        <input id="llm-custom-model" type="text" class="field-input" placeholder="线路上的原样 id，如 deepseek/deepseek-v4" autocomplete="off" spellcheck="false">
+        <label class="field-label" for="llm-custom-protocol" style="margin-top:8px">协议</label>
+        <select id="llm-custom-protocol" class="field-input">
+          <option value="openai">OpenAI 兼容</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="google">Google</option>
+          <option value="openai-responses">OpenAI Responses</option>
+        </select>
+        <button type="button" class="btn-apply" style="width:100%;margin:12px 0 0" onclick="confirmCustom()">试连并切换</button>
+      </div>
+      <div id="llm-model-section" class="settings-section" style="padding-top:6px">
+        <input id="llm-model-search" type="search" class="field-input" placeholder="🔍 搜索 kimi / k3 …" autocomplete="off" spellcheck="false" oninput="renderModelList()">
+        <div id="llm-model-status" class="hint" style="margin-top:4px"></div>
+        <div id="llm-model-list" class="llm-model-list" role="listbox" aria-label="模型"></div>
+      </div>
+      <div id="llm-confirm-home" style="padding:0 16px">
+        <div id="llm-confirm" class="llm-confirm" style="display:none" hidden>
+          <div id="llm-confirm-text" class="llm-confirm-text"></div>
+          <button id="llm-confirm-apply" type="button" class="btn-apply" onclick="applyLlmSelection()">试连并切换</button>
+          <div id="llm-confirm-error" class="llm-confirm-error"></div>
+          <div id="llm-candidates" class="llm-candidates"></div>
+          <details id="llm-tech-details" style="display:none">
+            <summary>技术细节</summary>
+            <pre id="llm-tech-body"></pre>
+          </details>
         </div>
       </div>
-      <div class="settings-section">
-        <label class="field-label">Provider</label>
-        <input id="s2-provider" type="text" class="field-input" readonly>
-      </div>
-      <div class="settings-section">
-        <label class="field-label">Base URL</label>
-        <input id="s2-base-url" type="text" class="field-input" readonly>
-      </div>
-      <div class="settings-section">
-        <label class="field-label">API Key</label>
-        <input id="s2-api-key" type="password" class="field-input" placeholder="sk-…">
-        <div id="s2-key-hint" class="hint"></div>
-      </div>
-      <div id="s2-error" class="step2-error"></div>
-      <button id="s2-apply" class="btn-apply" onclick="llmApply()">Apply</button>
     </div>
 
     <!-- OAuth (keep existing) -->
@@ -2847,7 +2931,7 @@ pre code.hljs{display:block;overflow-x:auto;padding:1em}code.hljs{padding:3px 5p
   Current colors taken from GitHub's CSS
 */.hljs{color:#c9d1d9;background:#0d1117}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#ff7b72}.hljs-title,.hljs-title.class_,.hljs-title.class_.inherited__,.hljs-title.function_{color:#d2a8ff}.hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id,.hljs-variable{color:#79c0ff}.hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#a5d6ff}.hljs-built_in,.hljs-symbol{color:#ffa657}.hljs-code,.hljs-comment,.hljs-formula{color:#8b949e}.hljs-name,.hljs-quote,.hljs-selector-pseudo,.hljs-selector-tag{color:#7ee787}.hljs-subst{color:#c9d1d9}.hljs-section{color:#1f6feb;font-weight:700}.hljs-bullet{color:#f2cc60}.hljs-emphasis{color:#c9d1d9;font-style:italic}.hljs-strong{color:#c9d1d9;font-weight:700}.hljs-addition{color:#aff5b4;background-color:#033a16}.hljs-deletion{color:#ffdcd7;background-color:#67060c}</style>
 <script>
-const LOOM_VERSION = "1.8.2";
+const LOOM_VERSION = "1.9.1";
 const $ = s => document.querySelector(s);
 const $msgs = $('#messages');
 const $input = $('#input');
@@ -2957,261 +3041,505 @@ async function loadLlmConfig() {
     const res = await fetch(apiUrl('/api/llm/config'));
     const cfg = await readJsonResponse(res);
     if (!res.ok) throw new Error(cfg.error || 'Failed to load config');
-    renderLlmStep1(cfg.model, cfg.presets);
-    setThinkingToggle(cfg.thinking || 'medium');
-    const tempSlider = document.getElementById('cfg-temperature');
-    const tempVal = document.getElementById('cfg-temperature-val');
-    const t = cfg.temperature != null ? cfg.temperature : 1;
-    tempSlider.value = t;
-    tempVal.textContent = Number(t).toFixed(1);
-    // Someone may have flipped SBS elsewhere (attune, another Loom tab) —
-    // resync the dot without animating a change the human did not just make.
-    if (typeof cfg.sbs_enabled === 'boolean') setSbsEnabled(cfg.sbs_enabled, false);
+    applyLlmConfigView(cfg);
+    await loadLlmRoutes();
   } catch (e) {
     setConfigStatus('✗ ' + e.message, 'error');
   }
 }
 
-// ── LLM Settings V2 ──
-let _presets = [];
-let _currentModel = '';
-let _pendingPreset = null;
+// ── LLM panel (docs/feat/llm-catalog.md §2.4 / §2.6) ──
+// Truth comes from the backend: GET /api/llm/routes (route table + has_key +
+// current provider/model, verbatim) and GET /api/llm/models?route= (the
+// route's live list merged with the Hearth catalog). Nothing here splices
+// ids or guesses base_urls.
+let _llmConfig = null;
+let _llmCurrent = null;
+let _llmRoutes = [];
+let _llmModelCache = null;
+let _llmModels = [];
+let _llmModelsReason = '';
+let _llmPickedRoute = null;
+let _llmPickedModel = null;
+let _llmLoadSeq = 0;
+let _llmFocusIdx = -1;
+let _llmPickerOpen = false;
 
-function renderLlmStep1(model, presets) {
-  _currentModel = model || '';
-  _presets = Array.isArray(presets) ? presets : [];
-
-  // Current model display
-  const currentEl = document.getElementById('llm-current');
-  const preset = _presets.find(p => p.model === _currentModel);
-  if (preset) {
-    currentEl.innerHTML = `<div class="model-name">${escHtml(preset.label)}</div><div class="model-detail">${escHtml(preset.model)} · ${escHtml(preset.provider)}</div>`;
-  } else if (_currentModel) {
-    currentEl.innerHTML = `<div class="model-name">${escHtml(_currentModel)}</div><div class="model-detail">custom</div>`;
-  } else {
-    currentEl.innerHTML = `<div class="model-name" style="color:var(--text-muted)">No model set</div>`;
-  }
-
-  // Preset list grouped by provider (exclude current)
-  const listEl = document.getElementById('llm-preset-list');
-  const others = _presets.filter(p => p.model !== _currentModel);
-  const providerNames = { 'anthropic': 'Claude', 'openai-responses': 'OpenAI', 'deepseek': 'DeepSeek', 'kimi': 'Kimi', 'google': 'Google', 'glm': 'GLM', 'self-hosted': '自部署' };
-  // Separate self-hosted presets from others
-  const selfHosted = others.filter(p => p.provider === 'self-hosted');
-  const rest = others.filter(p => p.provider !== 'self-hosted');
-  const groups = {};
-  for (const p of rest) {
-    const g = p.provider || 'other';
-    if (!groups[g]) groups[g] = [];
-    groups[g].push(p);
-  }
-  let html = '';
-  // Self-hosted section first (no key needed, one-click switch)
-  if (selfHosted.length > 0) {
-    html += `<div class="provider-group-label">自部署</div><div class="provider-items">`;
-    html += selfHosted.map(p => `
-      <div class="llm-item" onclick="llmSelectSelfHosted('${escAttr(p.id)}')">
-        ${escHtml(p.label)}
-      </div>
-    `).join('');
-    html += `</div>`;
-  }
-  for (const [provider, items] of Object.entries(groups)) {
-    const name = providerNames[provider] || provider;
-    html += `<div class="provider-group-label">${escHtml(name)}</div><div class="provider-items">`;
-    html += items.map(p => `
-      <div class="llm-item" onclick="llmSelect('${escAttr(p.id)}')">
-        ${escHtml(p.label.replace(/^(Claude|GPT|DeepSeek|Kimi|Gemini|GLM)\s*/i, ''))}
-        ${p.has_key === false ? '<span class="badge">🔑</span>' : ''}
-      </div>
-    `).join('');
-    html += `</div>`;
-  }
-  listEl.innerHTML = html;
-
-  // Show step 1, hide step 2
-  document.getElementById('llm-step1').style.display = '';
-  document.getElementById('llm-step2').style.display = 'none';
+function applyLlmConfigView(cfg) {
+  _llmConfig = cfg || {};
+  setThinkingToggle(_llmConfig.thinking || 'medium');
+  // Someone may have flipped SBS elsewhere (attune, another Loom tab) —
+  // resync the dot without animating a change the human did not just make.
+  if (typeof _llmConfig.sbs_enabled === 'boolean') setSbsEnabled(_llmConfig.sbs_enabled, false);
+  renderLlmCurrent({
+    provider: _llmConfig.provider,
+    model: _llmConfig.model,
+    has_key: !!(_llmConfig.has_api_key || _llmConfig.oauth_connected),
+  });
 }
 
-async function llmSelectSelfHosted(presetId) {
-  const preset = _presets.find(p => p.id === presetId);
-  if (!preset) return;
-  // Self-hosted: skip step 2, apply directly (no key needed)
-  const patch = {
-    model: preset.model,
-    provider: preset.provider,
-    base_url: inferBaseUrl(preset.provider),
-  };
-  try {
-    await applyConfigChange(patch);
-    renderLlmStep1(preset.model, _presets);
-  } catch (e) {
-    console.error('Self-hosted switch failed:', e);
+async function loadLlmRoutes() {
+  const res = await fetch(apiUrl('/api/llm/routes'));
+  const data = await readJsonResponse(res);
+  if (!res.ok) throw new Error(data.error || 'Failed to load routes');
+  _llmRoutes = Array.isArray(data.routes) ? data.routes : [];
+  const cur = data.current || {};
+  const route = llmRouteById(cur.provider);
+  renderLlmCurrent({
+    provider: cur.provider,
+    model: cur.model,
+    has_key: route ? !!(route.has_key || route.keyless_in_loom) : (_llmCurrent ? _llmCurrent.has_key : undefined),
+  });
+  if (_llmPickerOpen) renderRouteList();
+}
+
+function llmRouteById(id) {
+  if (!id) return null;
+  return (_llmRoutes || []).find(r => r.id === id) || null;
+}
+
+function llmRouteName(id) {
+  const r = llmRouteById(id);
+  return r ? (r.name || r.id) : (id || '?');
+}
+
+function llmCatalogEntry(provider, model) {
+  const cache = _llmModelCache || {};
+  const list = cache[provider];
+  return Array.isArray(list) ? (list.find(m => m.id === model) || null) : null;
+}
+
+function fmtContext(n) {
+  n = Number(n);
+  if (!n) return '';
+  if (n >= 1048576) return Math.round(n / 1048576) + 'M';
+  return Math.round(n / 1024) + 'K';
+}
+
+// Capability words from the catalog; nothing when the catalog has nothing.
+function llmCapWords(m) {
+  const out = [];
+  if (!m) return out;
+  if (m.reasoning === true) out.push('推理');
+  if (m.context) out.push(fmtContext(m.context) + ' 上下文');
+  if (m.tool_call === true) out.push('工具调用');
+  return out;
+}
+
+// Current card = backend (provider, model) as-is. `current.name` wins; the
+// catalog (if already loaded for that route) only adds a display name + chips.
+function renderLlmCurrent(current) {
+  current = current || {};
+  _llmCurrent = current;
+  const model = current.model || '';
+  const provider = current.provider || '';
+  const info = llmCatalogEntry(provider, model) || {};
+  const name = current.name || info.name || model;
+
+  const nameEl = document.getElementById('llm-current-name');
+  nameEl.textContent = model ? name : '还没有设置模型';
+  const routeEl = document.getElementById('llm-current-route');
+  routeEl.textContent = model ? `${llmRouteName(provider)} · ${model}` : '';
+
+  const dot = document.getElementById('llm-current-dot');
+  const health = !model ? 'bad' : (current.has_key === false ? 'warn' : 'ok');
+  dot.className = 'llm-dot ' + health;
+  dot.title = !model ? '没有模型' : (health === 'warn' ? '这条线路缺 key' : '可用');
+
+  const chips = document.getElementById('llm-current-chips');
+  const words = llmCapWords(current.reasoning != null || current.context ? current : info);
+  const unverified = (current.source || info.source) === 'catalog';
+  chips.innerHTML = words.map(w => `<span class="llm-chip${unverified ? ' unverified' : ''}">${escHtml(w)}</span>`).join('');
+}
+
+function openLlmPicker() {
+  _llmPickerOpen = true;
+  _llmPickedRoute = null;
+  _llmPickedModel = null;
+  document.getElementById('llm-overview').style.display = 'none';
+  const picker = document.getElementById('llm-picker');
+  picker.style.display = '';
+  hideLlmConfirm();
+  const cur = _llmCurrent || {};
+  const initial = llmRouteById(cur.provider) ? cur.provider : (_llmRoutes[0] ? _llmRoutes[0].id : 'custom');
+  selectRoute(initial);
+  // Key state may have changed since the panel opened (OAuth, another tab).
+  loadLlmRoutes().catch(() => {});
+}
+
+function closeLlmPicker() {
+  _llmPickerOpen = false;
+  hideLlmConfirm();
+  document.getElementById('llm-picker').style.display = 'none';
+  document.getElementById('llm-overview').style.display = '';
+}
+
+function renderRouteList() {
+  const listEl = document.getElementById('llm-route-list');
+  const routes = (_llmRoutes || []).concat([{ id: 'custom', name: '自定义', custom: true }]);
+  listEl.innerHTML = routes.map(r => {
+    const active = r.id === _llmPickedRoute;
+    const hasKey = !!(r.has_key || r.keyless_in_loom);
+    const dot = r.custom ? '' : `<span class="llm-dot ${hasKey ? 'ok' : ''}" title="${hasKey ? '已有 key' : '缺 key'}"></span>`;
+    return `<button type="button" class="llm-route${active ? ' active' : ''}" role="tab" aria-selected="${active}" data-route="${escAttr(r.id)}" onclick="selectRoute(this.dataset.route)">${dot}${escHtml(r.name || r.id)}</button>`;
+  }).join('');
+}
+
+function selectRoute(id) {
+  _llmPickedRoute = id;
+  _llmPickedModel = null;
+  _llmFocusIdx = -1;
+  hideLlmConfirm();
+  renderRouteList();
+  const isCustom = id === 'custom';
+  document.getElementById('llm-custom-form').style.display = isCustom ? '' : 'none';
+  document.getElementById('llm-model-section').style.display = isCustom ? 'none' : '';
+  const route = llmRouteById(id);
+  renderKeyCard(isCustom ? { id: 'custom', name: '自定义', has_key: true } : (route || { id, name: id, has_key: false }));
+  if (isCustom) {
+    document.getElementById('llm-custom-base-url').focus();
+    return;
   }
+  const search = document.getElementById('llm-model-search');
+  search.value = '';
+  search.focus();
+  loadLlmModels(id);
 }
 
-function llmSelect(presetId) {
-  const preset = _presets.find(p => p.id === presetId);
-  if (!preset) return;
-  _pendingPreset = preset;
-
-  // Fill step 2
-  document.getElementById('step2-title').textContent = preset.label;
-  document.getElementById('s2-provider').value = preset.provider || '';
-  const baseUrl = inferBaseUrl(preset.provider);
-  document.getElementById('s2-base-url').value = baseUrl;
-  document.getElementById('s2-api-key').value = '';
-  document.getElementById('s2-error').textContent = '';
-
-  // Key hint
-  const hintEl = document.getElementById('s2-key-hint');
-  if (preset.has_key === false) {
-    hintEl.textContent = `No key found for ${preset.provider}. Enter one below.`;
-    hintEl.style.color = '#f59e0b';
-  } else {
-    hintEl.textContent = `Key available for ${preset.provider}.`;
-    hintEl.style.color = 'var(--text-muted)';
-  }
-
-  // Show route toggle, hide custom model input
-  document.getElementById('s2-model-section').style.display = 'none';
-  document.getElementById('s2-route-section').style.display = '';
-  document.querySelectorAll('#s2-route button').forEach(b => b.classList.toggle('active', b.dataset.val === 'official'));
-
-  // Transition
-  document.getElementById('llm-step1').style.display = 'none';
-  document.getElementById('llm-step2').style.display = '';
+// Inline key card: only for a route that has no key (and is not keyless).
+// The input is always a password field and never echoes a stored key.
+function renderKeyCard(route) {
+  route = route || {};
+  const card = document.getElementById('llm-key-card');
+  const needsKey = !route.has_key && !route.keyless_in_loom && route.id !== 'custom';
+  card.hidden = !needsKey;
+  card.style.display = needsKey ? '' : 'none';
+  const input = document.getElementById('llm-key-input');
+  input.value = '';
+  input.placeholder = route.key_hint ? route.key_hint + '…' : 'sk-…';
+  document.getElementById('llm-key-title').textContent = `${route.name || route.id || '这条线路'} 还没有 key`;
+  document.getElementById('llm-key-hint').textContent = needsKey ? 'key 只存在这个 being 自己的 .being 里，保存后不会回显。' : '';
+  // ChatGPT subscription counts as the OpenAI route's key.
+  const oauth = document.getElementById('oauth-section');
+  if (oauth) oauth.style.display = (route.id === 'openai-responses' && needsKey) ? '' : 'none';
 }
 
-function setRoute(route) {
-  document.querySelectorAll('#s2-route button').forEach(b => b.classList.toggle('active', b.dataset.val === route));
-  if (!_pendingPreset) return;
-  const p = _pendingPreset;
-  if (route === 'openrouter') {
-    document.getElementById('s2-provider').value = 'openrouter';
-    document.getElementById('s2-base-url').value = 'https://openrouter.ai/api/v1';
-    // OpenRouter uses different model naming: provider/model
-    const orModel = p.provider + '/' + p.model;
-    document.getElementById('step2-title').textContent = p.label + ' (OpenRouter)';
-    _pendingPreset = {...p, _route: 'openrouter', _orModel: orModel};
-  } else {
-    document.getElementById('s2-provider').value = p.provider;
-    document.getElementById('s2-base-url').value = inferBaseUrl(p.provider);
-    document.getElementById('step2-title').textContent = p.label;
-    _pendingPreset = {...p, _route: 'official'};
-  }
-  // Update key hint
-  const route_provider = route === 'openrouter' ? 'openrouter' : p.provider;
-  document.getElementById('s2-key-hint').textContent = `Key for ${route_provider}`;
-}
-
-function llmSelectCustom() {
-  document.getElementById('s2-route-section').style.display = 'none';
-  _pendingPreset = { id: '__custom', label: 'Custom', model: '', provider: '', has_key: null };
-  document.getElementById('step2-title').textContent = 'Custom Model';
-  document.getElementById('s2-model-section').style.display = '';
-  document.getElementById('s2-model').value = '';
-  document.getElementById('s2-provider').value = '';
-  document.getElementById('s2-provider').removeAttribute('readonly');
-  document.getElementById('s2-base-url').value = '';
-  document.getElementById('s2-base-url').removeAttribute('readonly');
-  document.getElementById('s2-api-key').value = '';
-  // Gateways (PPIO, OpenRouter) address models by their full namespaced id —
-  // paste it verbatim together with the Base URL; leave Provider blank and the
-  // backend derives the wire protocol from the endpoint.
-  document.getElementById('s2-key-hint').textContent =
-    'Provider/Base URL optional. For a gateway, set Base URL and paste the full model id (e.g. deepseek/deepseek-v3).';
-  document.getElementById('s2-key-hint').style.color = 'var(--text-muted)';
-  document.getElementById('s2-error').textContent = '';
-  document.getElementById('llm-step1').style.display = 'none';
-  document.getElementById('llm-step2').style.display = '';
-}
-
-function llmBack() {
-  document.getElementById('llm-step1').style.display = '';
-  document.getElementById('llm-step2').style.display = 'none';
-  _pendingPreset = null;
-}
-
-async function llmApply() {
-  if (!_pendingPreset) return;
-  const btn = document.getElementById('s2-apply');
-  const errEl = document.getElementById('s2-error');
+async function saveRouteKey() {
+  const route = llmRouteById(_llmPickedRoute);
+  const input = document.getElementById('llm-key-input');
+  const key = (input.value || '').trim();
+  if (!route) return;
+  if (!key) { input.focus(); return; }
+  const btn = document.getElementById('llm-key-save');
+  const hint = document.getElementById('llm-key-hint');
   btn.disabled = true;
-  btn.textContent = 'Switching…';
-  errEl.textContent = '';
-
-  let model;
-  if (_pendingPreset.id === '__custom') {
-    model = (document.getElementById('s2-model').value || '').trim();
-    if (!model) { errEl.textContent = 'Enter a model name'; btn.disabled = false; btn.textContent = 'Apply'; return; }
-  } else {
-    model = _pendingPreset._route === 'openrouter' ? (_pendingPreset._orModel || _pendingPreset.model) : _pendingPreset.model;
-  }
-  const patch = { model };
-  const provider = document.getElementById('s2-provider').value.trim();
-  const baseUrl = document.getElementById('s2-base-url').value.trim();
-  const apiKey = document.getElementById('s2-api-key').value.trim();
-  if (provider) patch.provider = provider;
-  if (baseUrl) patch.base_url = baseUrl;
-  if (apiKey) patch.api_key = apiKey;
-
+  btn.textContent = '保存中…';
   try {
-    const data = await applyConfigChange(patch);
-    if (data && data.needs_key) {
-      errEl.textContent = data.error || 'API key required for this provider.';
-      btn.disabled = false;
-      btn.textContent = 'Apply';
-      document.getElementById('s2-api-key').focus();
+    const res = await fetch(apiUrl('/api/llm/keys'), {
+      method: 'POST',
+      headers: configHeaders(),
+      body: JSON.stringify({ route: route.id, api_key: key }),
+    });
+    const data = await readJsonResponse(res);
+    if (!res.ok || !data.ok) throw new Error(data.error || '保存失败');
+    route.has_key = true;
+    input.value = '';
+    renderKeyCard(route);
+    renderRouteList();
+    if (_llmModelCache) delete _llmModelCache[route.id];
+    await loadLlmModels(route.id);
+  } catch (e) {
+    hint.textContent = '✗ ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存并加载模型';
+  }
+}
+
+function llmByReleaseDesc(a, b) {
+  const da = a.release_date || '', db = b.release_date || '';
+  if (da !== db) return da < db ? 1 : -1;
+  return (a.id || '').localeCompare(b.id || '');
+}
+
+async function loadLlmModels(routeId) {
+  const listEl = document.getElementById('llm-model-list');
+  const statusEl = document.getElementById('llm-model-status');
+  if (!_llmModelCache) _llmModelCache = {};
+  if (_llmModelCache[routeId]) {
+    _llmModels = _llmModelCache[routeId].models;
+    _llmModelsReason = _llmModelCache[routeId].reason;
+    renderModelList();
+    return;
+  }
+  listEl.innerHTML = '<div class="llm-skeleton"></div><div class="llm-skeleton"></div><div class="llm-skeleton"></div>';
+  statusEl.textContent = '';
+  const slow = setTimeout(() => { statusEl.textContent = '线路响应慢，稍等……拉不到会退回目录。'; }, 5000);
+  const seq = ++_llmLoadSeq;
+  try {
+    const res = await fetch(apiUrl('/api/llm/models?route=' + encodeURIComponent(routeId)));
+    const data = await readJsonResponse(res);
+    if (!res.ok) throw new Error(data.error || '加载失败');
+    if (seq !== _llmLoadSeq) return;
+    const models = (Array.isArray(data.models) ? data.models : []).slice().sort(llmByReleaseDesc);
+    _llmModelCache[routeId] = { models, reason: data.reason || '' };
+    _llmModels = models;
+    _llmModelsReason = data.reason || '';
+    statusEl.textContent = data.reason ? `⚠ ${data.reason}` : '';
+    renderModelList();
+    if (_llmCurrent && _llmCurrent.provider === routeId && !_llmPickerOpen) renderLlmCurrent(_llmCurrent);
+  } catch (e) {
+    if (seq !== _llmLoadSeq) return;
+    _llmModels = [];
+    _llmModelsReason = e.message;
+    statusEl.textContent = '';
+    renderModelList();
+  } finally {
+    clearTimeout(slow);
+  }
+}
+
+function retryLlmModels() {
+  if (!_llmPickedRoute || _llmPickedRoute === 'custom') return;
+  if (_llmModelCache) delete _llmModelCache[_llmPickedRoute];
+  loadLlmModels(_llmPickedRoute);
+}
+
+// Models this being used on `routeId` (llm.history), most recent first.
+function llmRecentIds(routeId) {
+  const history = _llmConfig && Array.isArray(_llmConfig.history) ? _llmConfig.history : [];
+  const out = [];
+  for (const h of history) {
+    if (h && h.provider === routeId && h.model && !out.includes(h.model)) out.push(h.model);
+  }
+  return out.slice(0, 3);
+}
+
+function llmModelRowHtml(m) {
+  const unverified = m.source === 'catalog';
+  const month = (m.release_date || '').slice(0, 7);
+  const cls = 'llm-model-row' + (unverified ? ' unverified' : '') + (m.id === _llmPickedModel ? ' selected' : '');
+  return `<div class="${cls}" role="option" aria-selected="${m.id === _llmPickedModel}" data-id="${escAttr(m.id)}" onclick="selectModel(this.dataset.id)">
+    <div class="llm-model-line1"><span class="llm-model-name">${escHtml(m.name || m.id)}</span><span class="llm-model-caps">${escHtml(llmCapWords(m).join(' · '))}</span></div>
+    <div class="llm-model-line2"><span class="id">${escHtml(m.id)}</span><span class="when">${escHtml(month)}${unverified ? (month ? ' · ' : '') + '未验证' : ''}</span></div>
+  </div>`;
+}
+
+function renderModelList() {
+  const listEl = document.getElementById('llm-model-list');
+  // The confirm strip lives inside the list while a row is selected; park it
+  // before the list is rebuilt so it survives.
+  hideLlmConfirm(true);
+  const q = (document.getElementById('llm-model-search').value || '').trim().toLowerCase();
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const matches = m => {
+    const hay = (m.id + ' ' + (m.name || '')).toLowerCase();
+    return tokens.every(t => hay.includes(t));
+  };
+  const all = (_llmModels || []).filter(matches);
+  if (!all.length) {
+    const reason = _llmModels.length
+      ? '没有匹配的模型'
+      : '这条线路没有返回模型' + (_llmModelsReason ? '：' + _llmModelsReason : '');
+    listEl.innerHTML = `<div class="llm-empty">${escHtml(reason)} <a href="#" onclick="retryLlmModels();return false;">重试</a></div>`;
+    return;
+  }
+  const recent = llmRecentIds(_llmPickedRoute).map(id => all.find(m => m.id === id)).filter(Boolean);
+  const rest = all.filter(m => !recent.includes(m));
+  let html = '';
+  if (recent.length) html += '<div class="llm-model-group">最近</div>' + recent.map(llmModelRowHtml).join('');
+  if (rest.length) html += (recent.length ? '<div class="llm-model-group">全部</div>' : '') + rest.map(llmModelRowHtml).join('');
+  listEl.innerHTML = html;
+  _llmFocusIdx = -1;
+  if (_llmPickedModel) {
+    const row = listEl.querySelector(`.llm-model-row[data-id="${cssEscape(_llmPickedModel)}"]`);
+    if (row) showLlmConfirm(row);
+  }
+}
+
+function cssEscape(s) {
+  return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&');
+}
+
+function llmModelLabel(id) {
+  const m = (_llmModels || []).find(x => x.id === id);
+  return m && m.name ? m.name : id;
+}
+
+function selectModel(id) {
+  _llmPickedModel = id;
+  renderModelList();
+}
+
+// The confirm strip is one static element moved under the selected row
+// (not a new page); `park` only returns it home without clearing.
+function hideLlmConfirm(park) {
+  const confirm = document.getElementById('llm-confirm');
+  const home = document.getElementById('llm-confirm-home');
+  if (home && confirm.parentNode !== home) home.appendChild(confirm);
+  if (park) return;
+  confirm.hidden = true;
+  confirm.style.display = 'none';
+  confirm.classList.remove('failed');
+  document.getElementById('llm-confirm-error').textContent = '';
+  document.getElementById('llm-candidates').innerHTML = '';
+  document.getElementById('llm-tech-details').style.display = 'none';
+}
+
+function showLlmConfirm(anchor, label) {
+  const confirm = document.getElementById('llm-confirm');
+  const route = llmRouteById(_llmPickedRoute);
+  const text = label || `切换到 ${llmModelLabel(_llmPickedModel)} · ${route ? (route.name || route.id) : _llmPickedRoute}`;
+  document.getElementById('llm-confirm-text').textContent = text;
+  if (anchor && anchor.insertAdjacentElement) anchor.insertAdjacentElement('afterend', confirm);
+  confirm.hidden = false;
+  confirm.style.display = '';
+  confirm.scrollIntoView && confirm.scrollIntoView({ block: 'nearest' });
+}
+
+async function applyLlmSelection() {
+  const route = llmRouteById(_llmPickedRoute);
+  const model = _llmPickedModel;
+  if (!route || !model) return;
+  // The id is whatever the route listed — never provider-prefixed by hand.
+  await runLlmSwitch({ provider: route.id, model, base_url: route.base_url });
+}
+
+async function confirmCustom() {
+  const base_url = (document.getElementById('llm-custom-base-url').value || '').trim();
+  const model = (document.getElementById('llm-custom-model').value || '').trim();
+  const provider = document.getElementById('llm-custom-protocol').value || 'openai';
+  const form = document.getElementById('llm-custom-form');
+  _llmPickedModel = model;
+  showLlmConfirm(form, `切换到 ${model || '…'} · 自定义 (${provider})`);
+  if (!base_url || !model) {
+    document.getElementById('llm-confirm').classList.add('failed');
+    document.getElementById('llm-confirm-error').textContent = 'Base URL 和 Model id 都要填。';
+    return;
+  }
+  const patch = { provider, model, base_url };
+  const key = (document.getElementById('llm-key-input').value || '').trim();
+  if (key) patch.api_key = key;
+  await runLlmSwitch(patch);
+}
+
+async function runLlmSwitch(patch) {
+  const confirm = document.getElementById('llm-confirm');
+  const btn = document.getElementById('llm-confirm-apply');
+  confirm.classList.remove('failed');
+  document.getElementById('llm-confirm-error').textContent = '';
+  document.getElementById('llm-candidates').innerHTML = '';
+  document.getElementById('llm-tech-details').style.display = 'none';
+  btn.disabled = true;
+  btn.innerHTML = '<span class="llm-spin" aria-hidden="true"></span>正在试连…';
+  try {
+    const res = await fetch(apiUrl('/api/llm/config'), {
+      method: 'PATCH',
+      headers: configHeaders(),
+      body: JSON.stringify(patch),
+    });
+    const data = await readJsonResponse(res);
+    if (res.ok && data.ok && data.config) {
+      applyLlmConfigView(data.config);
+      closeLlmPicker();
+      const dot = document.getElementById('llm-current-dot');
+      dot.classList.remove('flash');
+      void dot.offsetWidth;
+      dot.classList.add('flash');
+      setConfigStatus('✓ 已切换，下一拍生效', 'success');
+      setTimeout(() => setConfigStatus('', ''), 3000);
+      loadLlmRoutes().catch(() => {});
       return;
     }
-    if (data && data.config) {
-      renderLlmStep1(data.config.model, data.config.presets || _presets);
-    }
-    btn.disabled = false;
-    btn.textContent = 'Apply';
+    showLlmSwitchError(data, res.status, patch);
   } catch (e) {
-    errEl.textContent = '✗ ' + e.message;
+    showLlmSwitchError({ error: e.message }, 0, patch);
+  } finally {
     btn.disabled = false;
-    btn.textContent = 'Apply';
+    btn.textContent = '试连并切换';
   }
 }
 
-function inferBaseUrl(provider) {
-  // Keep in sync with LlmConfig::CANONICAL_URLS (crates/organ/primitive/src/llm_config.rs).
-  const map = {
-    'anthropic': 'https://api.anthropic.com',
-    'openai': 'https://api.openai.com/v1',
-    'openai-responses': 'https://api.openai.com/v1',
-    'deepseek': 'https://api.deepseek.com',
-    'kimi': 'https://api.moonshot.cn/v1',
-    'google': 'https://generativelanguage.googleapis.com',
-    'glm': 'https://open.bigmodel.cn/api/paas/v4',
-    'self-hosted': 'http://115.190.110.33:7860/v1',
-  };
-  return map[provider] || '';
+// One human sentence + ≤3 clickable candidates + collapsed technical details.
+function showLlmSwitchError(data, httpStatus, patch) {
+  data = data || {};
+  const confirm = document.getElementById('llm-confirm');
+  const errEl = document.getElementById('llm-confirm-error');
+  confirm.hidden = false;
+  confirm.style.display = '';
+  confirm.classList.add('failed');
+  if (data.needs_key) {
+    const route = llmRouteById(_llmPickedRoute) || { id: data.provider || patch.provider, name: data.provider || patch.provider };
+    renderKeyCard({ ...route, has_key: false });
+    errEl.textContent = '这条线路还没有 key，先在上面填一个再试。';
+    document.getElementById('llm-key-input').focus();
+    return;
+  }
+  const status = data.http_status || httpStatus || 0;
+  const routeName = llmRouteName(patch.provider);
+  let human;
+  if (status === 400 || status === 404) human = `${routeName} 上没有 ${patch.model}`;
+  else if (status === 401 || status === 403) human = `${routeName} 拒绝了这个 key（HTTP ${status}）`;
+  else if (status >= 500) human = `${routeName} 暂时不可用（HTTP ${status}）`;
+  else human = data.error || '试连失败';
+  errEl.textContent = human;
+
+  const candidates = Array.isArray(data.candidates) ? data.candidates.slice(0, 3) : [];
+  const candEl = document.getElementById('llm-candidates');
+  candEl.innerHTML = candidates.length
+    ? '<span class="hint">你是不是想要：</span>' + candidates.map(c =>
+        `<button type="button" class="llm-candidate" data-id="${escAttr(c)}" onclick="retryLlmCandidate(this.dataset.id)">${escHtml(c)}</button>`
+      ).join('')
+    : '';
+
+  const tech = document.getElementById('llm-tech-details');
+  document.getElementById('llm-tech-body').textContent =
+    `HTTP ${status || '—'}\nroute: ${data.route || patch.provider || ''}\nmodel: ${data.model || patch.model || ''}\nbase_url: ${data.base_url || patch.base_url || ''}\n${data.error || ''}`;
+  tech.style.display = '';
+  tech.open = false;
 }
+
+function retryLlmCandidate(id) {
+  if (!id) return;
+  if (_llmPickedRoute === 'custom') {
+    document.getElementById('llm-custom-model').value = id;
+    confirmCustom();
+    return;
+  }
+  selectModel(id);
+  applyLlmSelection();
+}
+
+// Keyboard: ↑↓ move through rows, Enter picks / confirms, Esc steps back.
+document.getElementById('llm-picker').addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    if (_llmPickedModel) { _llmPickedModel = null; renderModelList(); } else closeLlmPicker();
+    return;
+  }
+  const rows = Array.from(document.querySelectorAll('#llm-model-list .llm-model-row'));
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!rows.length) return;
+    e.preventDefault();
+    _llmFocusIdx = e.key === 'ArrowDown'
+      ? Math.min(rows.length - 1, _llmFocusIdx + 1)
+      : Math.max(0, _llmFocusIdx - 1);
+    rows.forEach((r, i) => r.classList.toggle('focused', i === _llmFocusIdx));
+    rows[_llmFocusIdx].scrollIntoView({ block: 'nearest' });
+    return;
+  }
+  if (e.key === 'Enter') {
+    if (e.target && e.target.id === 'llm-key-input') { e.preventDefault(); saveRouteKey(); return; }
+    if (_llmPickedModel && e.target && e.target.id !== 'llm-model-search') { e.preventDefault(); applyLlmSelection(); return; }
+    if (_llmFocusIdx >= 0 && rows[_llmFocusIdx]) { e.preventDefault(); selectModel(rows[_llmFocusIdx].dataset.id); }
+    else if (rows.length === 1 && e.target && e.target.id === 'llm-model-search') { e.preventDefault(); selectModel(rows[0].dataset.id); }
+  }
+});
 
 function setThinkingToggle(val) {
   document.querySelectorAll('#cfg-thinking button').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.val === val);
   });
-}
-
-// Temperature slider
-document.getElementById('cfg-temperature').addEventListener('input', e => {
-  document.getElementById('cfg-temperature-val').textContent = Number(e.target.value).toFixed(1);
-});
-document.getElementById('cfg-temperature').addEventListener('change', e => {
-  applyConfigChange({ temperature: e.target.value });
-});
-
-async function rollbackLlm() {
-  const data = await applyConfigChange({ rollback: 'true' });
-  if (data && data.config) {
-    renderLlmStep1(data.config.model, data.config.presets || _presets);
-  }
 }
 
 async function applyConfigChange(patch) {
@@ -3225,15 +3553,14 @@ async function applyConfigChange(patch) {
     const data = await readJsonResponse(res);
     if (data.needs_key) {
       setConfigStatus(data.error || 'API key required', 'error');
-      // needs_key is handled by step2 flow, not here
       return data;
     }
     if (!res.ok || !data.ok) throw new Error(data.error || 'Failed');
-    renderLlmStep1(data.config.model, data.config.presets || _presets);
-    setThinkingToggle(data.config.thinking || 'medium');
+    applyLlmConfigView(data.config);
     const suffix = data.rolled_back ? ' (rolled back)' : '';
     setConfigStatus('✓ Updated' + suffix, 'success');
     setTimeout(() => setConfigStatus('', ''), 3000);
+    loadLlmRoutes().catch(() => {});
     return data;
   } catch (e) {
     setConfigStatus('✗ ' + e.message, 'error');
@@ -3463,6 +3790,18 @@ function setStatus(state) {
   streamStatus = state;
   applyDotClass();
   updateSendButton();
+}
+
+// 所有"在途工作"都收尾后，把卡住的 'thinking' 放回 connected。
+// 在途工作 = 人类流 / 断线恢复 / 自主呼吸 watcher / 202 追赶轮询——任何一个还在，
+// 它自己负责状态，这里不动。只动 'thinking'：'error' 要留给用户看；
+// 连接层的黄点/红点由 setConnState 管，effectiveDotClass 里它本来就优先。
+function settleIdleStatus() {
+  if (isStreaming || pendingRecovery || autonomousWatch || catchUpActive) return;
+  if (streamStatus !== 'thinking') return;
+  setStatus('connected');
+  tuiDone();
+  clearTuiHint();
 }
 
 const CONN_BANNER = {
@@ -4746,6 +5085,9 @@ function finalizeSendCleanup() {
   currentStreamId = null;
   isStreaming = false;
   updateSendButton();
+  // 流结束但没走到 message_stop（空回复 / 非用户触发的 abort 等）时状态会卡在 thinking。
+  // 202 分支先起追赶轮询再进这里，catchUpActive 挡着，不会把"being 正要回答"冲掉。
+  settleIdleStatus();
   // 恢复流程在途时先不放队列——否则可能在 cutover 之前又起一条新 breath
   if (pendingRecovery) return;
   scheduleFlushQueue();
@@ -4860,7 +5202,6 @@ async function send(text, filesOverride=null, sendOptions={}) {
 
   if (res.status === 202) {
     removeThinkingIndicator();
-    tuiClear();
     let spliced = false;
     try {
       const data = await res.json();
@@ -4869,9 +5210,10 @@ async function send(text, filesOverride=null, sendOptions={}) {
       spliced = true;
     }
     // Being 会立即中断当前 round 回复——不需要系统提示。
-    setStatus('thinking');
-    finalizeSendCleanup();
+    // TUI 不清：being 马上要回答这条消息，状态交给追赶轮询，它结束时再收。
+    // 先起轮询再收尾：finalizeSendCleanup 里的 settleIdleStatus 看到 catchUpActive 就不动状态。
     startCatchUpWatcher();
+    finalizeSendCleanup();
     return;
   }
 
@@ -5544,6 +5886,8 @@ function renderHistoryBatched(messages) {
 // 上一次 reconcileHistory 有没有新画出 being 的回复。202 追赶轮询用它判断
 // "回复到了没"——被打断标记和自己那条消息的回显都不算。
 let lastReconcileSawBeing = false;
+// 单调计数：有多少次对账画出过 being 的回复。追赶轮询起跑时记一笔，之后涨了就说明回复到了。
+let reconcileBeingDrawn = 0;
 
 // 返回新追加的消息条数。full=true 才清屏（首次加载 / 服务端重启）。
 // 单飞：并发调用（追赶轮询 + 自主呼吸 watcher + 切 tab 回来）共用同一个 in-flight
@@ -5632,6 +5976,7 @@ async function reconcileHistoryOnce({ full = false } = {}) {
     if (!incremental) sceneCacheSeeded = true;
     sceneCacheWrite(toCache, lastHistorySeq);
     if (!incremental) flushSceneCachePending();
+    if (lastReconcileSawBeing) reconcileBeingDrawn++;
     return added;
   } catch (e) {
     console.warn('reconcileHistory failed:', e);
@@ -5657,9 +6002,16 @@ const CATCH_UP_INITIAL_MS = 2000;
 const CATCH_UP_MAX_INTERVAL_MS = 30000;
 const CATCH_UP_ABSOLUTE_MAX_MS = 5 * 60 * 1000;
 let catchUpTimer = null;
+// 追赶轮询在途（含 tick 里 await 对账的那段，那时 catchUpTimer 是 null）。
+// settleIdleStatus 看它决定能不能把 thinking 放回 connected。
+// catchUpGen 让被 stop / 重启顶掉的旧闭包认出自己已经过期。
+let catchUpActive = false;
+let catchUpGen = 0;
 
 function stopCatchUpWatcher() {
   if (catchUpTimer) { clearTimeout(catchUpTimer); catchUpTimer = null; }
+  catchUpGen++;
+  catchUpActive = false;
 }
 
 // 纯函数，方便单测：给定上一次间隔，返回下一次间隔（指数退避，封顶）。
@@ -5669,19 +6021,39 @@ function nextCatchUpDelay(prev) {
 
 function startCatchUpWatcher() {
   stopCatchUpWatcher();
+  const gen = catchUpGen;
+  catchUpActive = true;
+  const beingDrawnAtStart = reconcileBeingDrawn;
   const startedAt = Date.now();
   const deadline = startedAt + CATCH_UP_ABSOLUTE_MAX_MS;
   let delay = CATCH_UP_INITIAL_MS;
+  // being 正要回答这条入队的消息：点和 TUI 都得表达出来，直到回复画出来为止。
+  // 本地有流在跑时（spliceSend 打进 live 流）状态归那条流管，不去抢。
+  if (!isStreaming) {
+    setStatus('thinking');
+    if (!$tuiBar.classList.contains('active')) tuiSet('thinking');
+  }
+  // 轮询结束（回复到了 / 放弃 / 被新流接管）：交还状态。被顶掉的旧闭包什么都不做。
+  const end = () => {
+    if (gen !== catchUpGen) return;
+    catchUpActive = false;
+    settleIdleStatus();
+  };
   const tick = async () => {
     catchUpTimer = null;
+    if (gen !== catchUpGen) return;
     // 本地已经在流了（202 后又发了一条拿到 200）→ 那条流会把一切画出来
-    if (isStreaming) return;
+    if (isStreaming) { end(); return; }
     await reconcileHistory();
-    if (lastReconcileSawBeing) return;
-    // await 期间可能起了新流 / 又来了一次 202 重启 watcher——别在旧闭包里续命
-    if (isStreaming || catchUpTimer) return;
+    // await 期间可能被 stop / 又来了一次 202 重启 watcher——别在旧闭包里续命
+    if (gen !== catchUpGen) return;
+    // 用计数而不是 lastReconcileSawBeing：回复也可能被别的对账（切回前台、
+    // 自主呼吸 watcher 收尾）先画出来，那次之后我这边的对账就看不到"新"的了。
+    if (reconcileBeingDrawn > beingDrawnAtStart) { end(); return; }
+    if (isStreaming) { end(); return; }
     if (Date.now() >= deadline) {
       console.warn(`catch-up watcher gave up after ${Math.round((Date.now() - startedAt) / 1000)}s without a being reply`);
+      end();
       return;
     }
     delay = nextCatchUpDelay(delay);
@@ -5693,9 +6065,11 @@ function startCatchUpWatcher() {
 }
 
 // 自主呼吸（beating / callback / leftover）在 /api/stream/active 上有 stream_id
-// 和 origin，但没有事件（Collect sink）。不能走 replayStream —— 那会把
-// isStreaming 置 true、挂 thinking 气泡、结束时只推游标不渲染，回复永远画不出来。
-// 这里只轻量轮询 finished，结束后 reconcileHistory 把落盘的内容拉进来。
+// 和 origin。callback 呼吸的 Collect sink 会经 vis_tx 把每轮的 reasoning / 文本 /
+// tool_use / tool_result 镜像进缓冲（整轮一次，不是逐 token）；其他 origin 可能
+// 没有事件。不能走 replayStream —— 那会把 isStreaming 置 true、挂 thinking 气泡、
+// 结束时只推游标不渲染，回复永远画不出来。这里用 ?after= 增量轮询、边拿边画，
+// finished 后清掉预览，reconcileHistory 把落盘的内容拉进来。
 const AUTONOMOUS_ORIGIN_LABELS = {
   beating: 'being 正在自己想事情…',
   callback: 'being 正在处理一条回调…',
@@ -5716,25 +6090,43 @@ function watchAutonomousStream(data) {
   if (!streamId) return;
   if (autonomousWatch && autonomousWatch.streamId === streamId) return;   // 已经在盯
   stopAutonomousWatch();
-  const watch = { streamId, timer: null };
+  const watch = { streamId, timer: null, afterSeq: 0, rendered: false };
   autonomousWatch = watch;
   let interval = 2000;
   const deadline = Date.now() + POLL_ABSOLUTE_MAX_MS;
   setStatus('thinking');
+  tuiSet('thinking');
   setTuiHint(AUTONOMOUS_ORIGIN_LABELS[data.origin] || 'being 正在呼吸…');
 
   const release = () => {
     if (autonomousWatch !== watch) return false;
     autonomousWatch = null;
     clearTuiHint();
-    if (!isStreaming) setStatus('connected');
+    // 人类流在跑 → 它管状态；202 追赶还在等回复 → 继续 thinking；
+    // 否则放回 connected，并收掉 watch 起跑时 tuiSet 的活动条（之前会一直挂着计时）。
+    settleIdleStatus();
     return true;
+  };
+  // Clean up preview elements rendered from autonomous events so
+  // reconcileHistory can replace them with the final version from history.
+  // streamEl / streamText / writerEpoch are shared with the human stream:
+  // only touch them while no human stream owns them.
+  const cleanupPreview = () => {
+    if (!watch.rendered || isStreaming) return;
+    if (renderTimer) { cancelAnimationFrame(renderTimer); renderTimer = null; }
+    // streamEl is the .content node; drop the whole .message wrapper.
+    if (streamEl) { streamEl.closest('.message')?.remove(); streamEl = null; }
+    streamText = '';
+    writerEpoch++;
+    removeThinkingIndicator();
+    actionLogClear();
   };
   const finish = async () => {
     if (!release()) return;
+    cleanupPreview();
     await reconcileHistory();
     // 这次对账已经画出 being 的回复 → 202 追赶轮询没必要再跑到 5 分钟上限
-    if (lastReconcileSawBeing) stopCatchUpWatcher();
+    if (lastReconcileSawBeing) { stopCatchUpWatcher(); settleIdleStatus(); }
   };
   const poll = async () => {
     watch.timer = null;
@@ -5742,7 +6134,7 @@ function watchAutonomousStream(data) {
     if (isStreaming) { release(); return; }   // 人类流接管了，live 通道自己会画
     if (Date.now() > deadline) { await finish(); return; }
     try {
-      const r = await fetch(apiUrl('/api/stream/active'), {
+      const r = await fetch(apiUrl('/api/stream/active' + (watch.afterSeq ? '?after=' + watch.afterSeq : '')), {
         cache: 'no-store',
         signal: timeoutSignal(8000),
       });
@@ -5754,7 +6146,26 @@ function watchAutonomousStream(data) {
           if (d.origin && d.origin !== 'human' && !d.finished) watchAutonomousStream(d);
           return;
         }
+        // The fetch was async: a human stream may have taken over the shared
+        // streamEl / streamText meanwhile. Don't write into it.
+        if (autonomousWatch !== watch) return;
+        if (isStreaming) { release(); return; }
+        // Render events from the SBS breath (thinking, tool_use, delta, etc.)
+        const events = Array.isArray(d.events) ? d.events : [];
+        for (const item of events) {
+          const seq = Number(item.seq);
+          if (Number.isFinite(seq) && seq <= watch.afterSeq) continue;
+          processReplayEvent(item.event, item.data || {});
+          watch.rendered = true;
+          if (Number.isFinite(seq)) watch.afterSeq = seq;
+        }
         if (d.finished) { await finish(); return; }
+        if (events.length) {
+          // Events are flowing: poll fast, skip the backoff below.
+          interval = 1000;
+          if (autonomousWatch === watch) watch.timer = setTimeout(poll, interval);
+          return;
+        }
       }
     } catch (e) {
       console.warn('autonomous stream watch failed:', e);

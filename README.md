@@ -15,7 +15,7 @@ That's it. One HTML file, one Being, one conversation.
 
 ## What is Loom?
 
-Loom is the conversational interface for Beings powered by [Heart](https://github.com/anthropics/heart) — the infrastructure that gives each Being its own memory, identity, and rhythm.
+Loom is the conversational interface for Beings powered by [Heart](https://github.com/d5z/heart-portal) — the infrastructure that gives each Being its own memory, identity, and rhythm.
 
 Each Being has a unique token. Without the correct token, you see an empty page.
 
